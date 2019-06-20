@@ -78,6 +78,7 @@ def make_box_of_molecules(molecules, num_molecules, box,
     os.system('packmol < pk.inp > pk.log')
     atoms = io.read(outputfile)
     atoms.cell = box    
+    os.system('rm pk* *.pdb')
     return atoms
 
 def write_lammps_inputs_moltemplate(atoms, force_field, num_molecules):
@@ -331,6 +332,8 @@ def surround_with_water(atoms, spacing = 8, metal = 'Ti'):
             a periodic atoms object surrounded with water
 
     """
+    from ase.build import molecule
+    from ase.atoms import Atoms
     d = 0
     for dimension in range(3):
         smallest_value = min(atoms.positions[:, dimension])
@@ -347,19 +350,19 @@ def surround_with_water(atoms, spacing = 8, metal = 'Ti'):
     # this next part is such a mess, I'm so sorry
     # all this is doing is trying to make the particle more centered in the unit cell
     atoms = make_box_of_molecules([molecule('H2O'),atoms], [number_of_waters,1], atoms.cell)
-    metals_s = [a for a in atoms if a.symbol == metal]
+    metal_s = [a for a in atoms if a.symbol == metal]
     metal_object = Atoms(cell = atoms.cell)
     for atom in metal_s:
         metal_object += atom
     initial_metal_positions = metal_object.positions.copy()
-    Ti.center()
+    metal_object.center()
     shift = initial_metal_positions[0] - metal_object.positions[0]
     atoms.positions -= shift
     # </mess>
     atoms.wrap(pbc = [True] * 3)
     return atoms
 
-def make_wulffish_nanoparticle(atoms, millers, energies):
+def make_wulffish_nanoparticle(atoms, millers, surface_energies, rmax):
     """
     wraps the nanoparticle generation functionality of MPInterface (link below).
     It's not perfect for complicated structures, but it gets you pretty close.
@@ -369,7 +372,7 @@ def make_wulffish_nanoparticle(atoms, millers, energies):
             the bulk structure you want to make a nanoparticle of
         millers:
             a list of miller indicies you want to include i.e. [(1,1,1),(1,0,0)]
-        energies:
+        surface_energies:
             a list of energies that corresponds to the miller indicies
 
     returns:
@@ -388,11 +391,13 @@ def make_wulffish_nanoparticle(atoms, millers, energies):
 
 
     nanoparticle = Nanoparticle(structure_conventional, rmax=rmax,
-                            hkl_family=hkl_family,
+                            hkl_family=millers,
                             surface_energies=surface_energies)
 
     nanoparticle.create()
-    particle = adaptor.get_atoms(structure)
+    #particle = adaptor.get_atoms(nanoparticle)
+    particle = adaptor.get_atoms(nanoparticle.get_boxed_structure(10**6,10**6,10**6))
+    particle.set_cell([0] * 3)
     #nanoparticle.to(fmt='xyz', filename='nanoparticle.xyz')
     return particle
 
