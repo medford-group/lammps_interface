@@ -401,3 +401,30 @@ def make_wulffish_nanoparticle(atoms, millers, surface_energies, rmax):
     #nanoparticle.to(fmt='xyz', filename='nanoparticle.xyz')
     return particle
 
+def put_water_on_slab(atoms, offset = 1.5):
+    """
+    overlays a water layer on top of a slab. This does not care about what the physics
+    of water on this slab should be, it just puts some waters above it from packmol. The
+    cell of the slab should be a orthogonal
+
+    inputs:
+        atoms:
+            the atoms object of the slab
+        offset:
+            how far the water layer should be offset
+
+    returns:
+        slab:
+            the water covered slab
+    """
+    from ase.build import molecule
+    highest_atom = max(atoms.positions[:,2])
+    length, width, top_of_cell = atoms.cell[0,0], atoms.cell[1,1],atoms.cell[2,2]
+    height = top_of_cell - highest_atom
+    volume = length * width * height
+    number_of_waters = int(np.floor(volume * 0.0333679))
+    water_layer = make_box_of_molecules([molecule('H2O')], [number_of_waters],
+                                        box = [length, width, height - offset])
+    water_layer.positions += np.array([0, 0, highest_atom + offset])
+    slab = atoms + water_layer
+    return slab
