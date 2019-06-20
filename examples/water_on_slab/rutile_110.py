@@ -16,19 +16,18 @@ c = 2.95
 rutile =crystal(['Ti', 'O'], basis=[(0, 0, 0), (0.3, 0.3, 0.0)],
                 spacegroup=136, cellpar=[a, a, c, 90, 90, 90])
 
-structure = adaptor.get_structure(rutile)
 
+structure = adaptor.get_structure(rutile)
+# generate the slab
 gen = SlabGenerator(structure, miller_index = (1,1,0), lll_reduce = True,
                     min_slab_size = 10, min_vacuum_size = 20)
 
 slab = gen.get_slabs()
 
-#slabs = generate_all_slabs(structure, max_index = 1,
-#                           min_slab_size = 10, min_vacuum_size = 10)
 
-#print(slabs[3].miller_index)
 slab = adaptor.get_atoms(slab[1].get_orthogonal_c_slab()) * (3,3,1)
 slab.center()
+slab.write('rutile_110.traj')
 slab = put_water_on_slab(slab)
+slab.write('water_rutile_110.traj')
 view(slab)
-

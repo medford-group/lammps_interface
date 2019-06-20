@@ -428,3 +428,22 @@ def put_water_on_slab(atoms, offset = 1.5):
     water_layer.positions += np.array([0, 0, highest_atom + offset])
     slab = atoms + water_layer
     return slab
+
+def convert_to_csv_file(atoms, filename = 'atoms.csv'):
+    """
+    takes an atoms object and converts it to a csv format: 'x, y, z, atom'
+
+    inputs:
+        atoms:
+            the atoms object
+        filename:
+            the name of the file you want to write to
+
+    returns:
+        None
+    """
+    with open(filename,'w') as f:
+        for atom in atoms:
+            x, y, z = atom.position
+            f.write('{}, {}, {}, {}\n'.format(x,y,z,atom.symbol))
+
