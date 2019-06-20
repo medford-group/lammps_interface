@@ -10,6 +10,6 @@ setup(name='lammps_interface',
       author_email='ben.comer@gatech.edu',
       url='https://github.com/medford-group/lammps_interface',
       packages=find_packages(),
-      install_requires=['spglib', 'numpy','ase','scipy'],
+      install_requires=['spglib', 'numpy','ase','scipy', 'MPInterfaces_Latest'],
      )
 

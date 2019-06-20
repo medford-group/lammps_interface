@@ -1,4 +1,3 @@
-#!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 """
 Created on Wed Jan  9 12:31:50 2019
@@ -10,6 +9,11 @@ import importlib
 import numpy as np
 import os
 from ase import io
+from pymatgen.io.ase import AseAtomsAdaptor as adaptor
+from ase.spacegroup import crystal
+from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+from mpinterfaces import get_struct_from_mp
+from mpinterfaces.nanoparticle import Nanoparticle
 
 force_fields = {'tip3p_2004':'TIP3P_2004','tip3p_1983_charmm_hybrid':'tip3p_1983_charmm_hybrid'}
 
@@ -307,4 +311,88 @@ def make_standard_input(calculation_type = 'reaxff',
     
     
 
+def surround_with_water(atoms, spacing = 8, metal = 'Ti'):
+    """
+    takes in an object (usually a nano-particle) and surrounds it with water 
+    molecules at approximately the right for room temperature density. It assumes 
+    your object is roughly spherical.
+
+    inputs:
+        atoms:
+            the atoms object you'd like to surround with water
+        spacing:
+            how much spacing you'd like around the object
+        metal:
+            If you have a particular atom you'd like centered, in the middle
+            of the cell, input it here
+
+    returns:
+        atoms:
+            a periodic atoms object surrounded with water
+
+    """
+    d = 0
+    for dimension in range(3):
+        smallest_value = min(atoms.positions[:, dimension])
+        largest_value = max(atoms.positions[:,dimension])
+        max_dist = largest_value - smallest_value
+        if max_dist > d:
+            d = max_dist
+    atoms.set_cell([d+8] * 3)
+    atoms.center()
+    number_of_waters = int(np.floor((atoms.get_volume() - (d) ** 3) * 0.0333679)) # approximate density of water
+    print(number_of_waters)
+    if d == 5:
+        number_of_waters += 8
+    # this next part is such a mess, I'm so sorry
+    # all this is doing is trying to make the particle more centered in the unit cell
+    atoms = make_box_of_molecules([molecule('H2O'),atoms], [number_of_waters,1], atoms.cell)
+    metals_s = [a for a in atoms if a.symbol == metal]
+    metal_object = Atoms(cell = atoms.cell)
+    for atom in metal_s:
+        metal_object += atom
+    initial_metal_positions = metal_object.positions.copy()
+    Ti.center()
+    shift = initial_metal_positions[0] - metal_object.positions[0]
+    atoms.positions -= shift
+    # </mess>
+    atoms.wrap(pbc = [True] * 3)
+    return atoms
+
+def make_wulffish_nanoparticle(atoms, millers, energies):
+    """
+    wraps the nanoparticle generation functionality of MPInterface (link below).
+    It's not perfect for complicated structures, but it gets you pretty close.
+
+    inputs:
+        atoms:
+            the bulk structure you want to make a nanoparticle of
+        millers:
+            a list of miller indicies you want to include i.e. [(1,1,1),(1,0,0)]
+        energies:
+            a list of energies that corresponds to the miller indicies
+
+    returns:
+        particle:
+            the atoms object of the wulff construction
+
+
+    https://github.com/henniggroup/MPInterfaces
+    """
+    structure = adaptor.get_structure(atoms)
+
+
+
+    sa = SpacegroupAnalyzer(structure)
+    structure_conventional = sa.get_conventional_standard_structure()
+
+
+    nanoparticle = Nanoparticle(structure_conventional, rmax=rmax,
+                            hkl_family=hkl_family,
+                            surface_energies=surface_energies)
+
+    nanoparticle.create()
+    particle = adaptor.get_atoms(structure)
+    #nanoparticle.to(fmt='xyz', filename='nanoparticle.xyz')
+    return particle
 
