@@ -12,8 +12,6 @@ from ase import io
 from pymatgen.io.ase import AseAtomsAdaptor as adaptor
 from ase.spacegroup import crystal
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
-from mpinterfaces import get_struct_from_mp
-from mpinterfaces.nanoparticle import Nanoparticle
 
 force_fields = {'tip3p_2004':'TIP3P_2004','tip3p_1983_charmm_hybrid':'tip3p_1983_charmm_hybrid'}
 
@@ -156,7 +154,7 @@ def write_lammps_data(atoms, filename = 'lmp.data',
     # order lowest to highest
     numbers.sort()
     for i, number in enumerate(numbers):
-        number_dict[number] = i # maps atomic numbers to LAMMPS atom type numbering
+        number_dict[number] = i + 1 # maps atomic numbers to LAMMPS atom type numbering
     
     # sort out charges
     charges = atoms.get_initial_charges()
@@ -364,6 +362,7 @@ def strip_bonding_information(filename):
     f.close()
     
 def make_standard_input(calculation_type = 'reaxff',
+                        ff_file = 'TiO2_water.reax',
                         timestep = 0.2, 
                         ensemble = 'nvt',
                         steps = 20000,
@@ -379,14 +378,18 @@ def make_standard_input(calculation_type = 'reaxff',
      
     from .standard_inputs import input_files
 
-    with open('input.lammps','w') as f:
-        f.write(input_files[calculation_type].format(timestep, 
-                                             temp, 
-                                             steps))
+    with open('lmp.input','w') as f:
+        f.write(input_files[calculation_type].format(
+                                                     ff_file,
+                                                     timestep, 
+                                                     temp, 
+                                                     steps))
     
     
 
-def surround_with_water(atoms, spacing = 8, metal = 'Ti'):
+def surround_with_water(atoms, particle_spacing = 8,
+                        metal = 'Ti', shape = 'spherical',
+                        shape_factor = 0.9):
     """
     takes in an object (usually a nano-particle) and surrounds it with water 
     molecules at approximately the right for room temperature density. It assumes 
@@ -395,11 +398,18 @@ def surround_with_water(atoms, spacing = 8, metal = 'Ti'):
     inputs:
         atoms:
             the atoms object you'd like to surround with water
-        spacing:
-            how much spacing you'd like around the object
+        particle_spacing:
+            how much spacing you'd like around the particle
         metal:
             If you have a particular atom you'd like centered, in the middle
             of the cell, input it here
+        shape:
+            the approximate shape of your particle, right now only spherical
+            and rectangular are implemented
+        shape_factor:
+            the factor (between 0 and 1) by which you think the spherical/
+            rectangular volume is off. This is multiplied by the calculated
+            volume
 
     returns:
         atoms:
@@ -408,19 +418,22 @@ def surround_with_water(atoms, spacing = 8, metal = 'Ti'):
     """
     from ase.build import molecule
     from ase.atoms import Atoms
-    d = 0
+    d = []
     for dimension in range(3):
         smallest_value = min(atoms.positions[:, dimension])
         largest_value = max(atoms.positions[:,dimension])
         max_dist = largest_value - smallest_value
-        if max_dist > d:
-            d = max_dist
-    atoms.set_cell([d+8] * 3)
+        d.append(max_dist)
+    atoms.set_cell([a + particle_spacing for a in d])
     atoms.center()
+    if shape == 'spherical':
+        # 4/3pi*r**3
+        volume = 4 / 3 * np.pi * (max(d) / 2) ** 3
+    elif shape == 'rectangular':
+        volume = np.product(d)
+    volume *= shape_factor
+
     number_of_waters = int(np.floor((atoms.get_volume() - (d) ** 3) * 0.0333679)) # approximate density of water
-    print(number_of_waters)
-    if d == 5:
-        number_of_waters += 8
     # this next part is such a mess, I'm so sorry
     # all this is doing is trying to make the particle more centered in the unit cell
     atoms = make_box_of_molecules([molecule('H2O'),atoms], [number_of_waters,1], atoms.cell)
@@ -456,13 +469,11 @@ def make_wulffish_nanoparticle(atoms, millers, surface_energies, rmax):
 
     https://github.com/henniggroup/MPInterfaces
     """
+    from mpinterfaces.nanoparticle import Nanoparticle
     structure = adaptor.get_structure(atoms)
-
-
 
     sa = SpacegroupAnalyzer(structure)
     structure_conventional = sa.get_conventional_standard_structure()
-
 
     nanoparticle = Nanoparticle(structure_conventional, rmax=rmax,
                             hkl_family=millers,
