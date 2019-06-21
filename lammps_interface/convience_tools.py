@@ -113,6 +113,80 @@ def write_lammps_inputs_moltemplate(atoms, force_field, num_molecules):
             ' [' + str(num_molecules) + ']')
     f.close()
     os.system('moltemplate.sh -pdb mt.pdb -atomstyle full mt.lt &> mt.log')
+
+def write_lammps_data(atoms, filename = 'lmp.data', 
+                      atoms_style = 'full', bonding = False):
+    """
+    a function for writing LAMMPS data files. These files are the "atomic positions"
+    input file. Currently only the "full" atom type is supported. This is probably all
+    you need.
+
+    inputs:
+        atoms:
+            The atoms object
+        filename:
+            whatever you'd like the filename to be
+        atoms_style:
+            the atoms style to be used in LAMMPS
+        bonding:
+            if you want bonding included
+
+    returns:
+        None
+    """
+    from ase.data import atomic_masses, chemical_symbols
+
+    supported_styles = ['full']
+
+    # check inputs
+    if atoms_style not in supported_styles:
+        raise Exception('atoms style {} is not supported currently, only syles: {} are supported'.format(atoms_style, supported_styles))
+
+    if bonding == True:
+        raise Exception('This function has not implemented bonding')
+
+    # sort out the numbering of the atomic symbols
+    number_dict = {}
+    numbers = list(set(atoms.get_atomic_numbers()))
+    # order lowest to highest
+    numbers.sort()
+    for i, number in enumerate(numbers):
+        number_dict[number] = i # maps atomic numbers to LAMMPS atom type numbering
+    
+    # sort out charges
+    charges = atoms.get_initial_charges()
+
+    f = open(filename, 'w')
+
+    # header stuff
+    f.write('Made with Medford Group LAMMPS Interface\n\n\n')
+    f.write('{}  atoms\n'.format(len(atoms)))
+    f.write('{}  atom types\n'.format(len(number_dict))) 
+    f.write('0 {} xlo xhi\n'.format(atoms.cell[0][0]))
+    f.write('0 {} ylo yhi\n'.format(atoms.cell[1][1]))
+    f.write('0 {} zlo zhi\n\n'.format(atoms.cell[2][2]))
+
+    # atomic masses
+    f.write('Masses\n\n')
+    for atomic_number, atom_type_number in number_dict.items():
+        f.write('{} {} # {}\n'.format(atom_type_number,
+                               atomic_masses[atomic_number],
+                               chemical_symbols[atomic_number]))
+    
+    # The actual atomic inputs
+    f.write('\n\n')
+    f.write('Atoms\n\n')
+
+    for i, atom in enumerate(atoms):
+        x, y, z = atom.position
+        f.write('{} {} {} {} {} {} {}\n'.format(
+                                            str(i + 1), # index
+                                            '0', # bonding index
+                                            number_dict[atom.number], # atom type numbers
+                                            atom.charge, # charges
+                                            x, y, z))
+    f.close() 
+
     
 def fix_xyz_files(fil, data_file):
     """
