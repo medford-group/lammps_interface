@@ -19,7 +19,7 @@ input_files = {
     dump molfile all custom 500 atoms.atm type x y z fx fy fz c_energy
     #fix 1 all 1 0.0 10.0 1.0e-6 qeq/reax
     #fix   fxnvt all nvt temp 300.0 300.0 500.0 tchain 1
-    fix   fxnvp all npt temp {} 300.0 500.0 tchain 1 press 1.0 1.0 1
+    fix   fxnvp all npt temp {} 300.0 500.0 tchain 1 aniso 1.0 1.0 1.0
     #compute myRDF all rdf 100
     #fix 1 all ave/time 100 1 1000000 c_myRDF[*] file tmp.rdf mode vector
     run   {}""",

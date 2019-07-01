@@ -10,10 +10,10 @@ Install with:
 ensure that packmol is installed for full functionality, but some stuff works without it
 
 ## Usage
-Since this package consists of python functions you'll need to import them from the `convience_tools` file. The functions have long names so that they are as descriptive and simple as possible.
+Since this package consists of python functions you'll need to import them from the `tools.py` file. The functions have long names so that they are as descriptive and simple as possible.
 
 ```
-from lammps_interface.lammps_interface.convience_tools import make_box_of_molecules
+from lammps_interface.lammps_interface.tools import make_box_of_molecules
 from ase.build import molecule
 
 atoms = make_box_of_molecules(molecule[H2O],700,[40,40,40])
