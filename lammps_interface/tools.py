@@ -515,6 +515,82 @@ def put_water_on_slab(atoms, offset = 1.5):
     slab = atoms + water_layer
     return slab
 
+
+def make_rdf_based_descriptors(images, n_descriptors = 20,
+                               index = 0, descriptor_type = 'simplenn'):
+    """
+    generates reasonable values for eta and rs for a given image in a trajectory
+    based on the radial distribution function.
+    """
+    from scipy.integrate import trapz
+    from ase.ga.utilities import get_rdf
+    #import matplotlib.pyplot as plt
+    fall_off_percent = 0.05 # arbitrarily chosen
+    localization_distance = 0.2 # arbitrarily chosen
+
+    if type(images) == list:
+        atoms = images[index]
+    else:
+        atoms = images
+
+    rdf = get_rdf(atoms, rmax = 6, nbins = 50)
+    rdf_1, distances = rdf
+    # find 75% index
+    cut = int(-1 * np.ceil(len(rdf) * 0.75))
+    rdf_mean = np.mean(rdf_1[cut:])
+    # subtract off the mean and make all positive
+    #rdf_1 -= rdf_mean
+    rdf_1 = abs(rdf_1)
+    integrals = []
+    for i in range(len(rdf_1)):
+        integrals.append(trapz(rdf_1[:i+1]))
+    # divide the integral evenly
+    increment = integrals[-1] / n_descriptors
+    n = 1
+    descriptor_distances = []
+    for distance, integral in zip(distances, integrals):
+        if integral > (n * increment):
+            descriptor_distances.append(distance)
+            n += 1
+    etas = []
+    rs_s = [0] * n_descriptors
+    for distance in descriptor_distances:
+        etas.append(-1 * np.log(fall_off_percent) / distance)
+    for distance in descriptor_distances:
+        etas.append(-1 * np.log(fall_off_percent) / localization_distance)
+        rs_s.append(distance)
+    #plt.scatter(distances, rdf_1)
+    #for distance in descriptor_distances:
+    #    plt.plot([distance]*2, [max(rdf_1),min(rdf_1)])
+    #plt.show()
+    return etas, rs_s
+
+def make_params_file(files, etas, rs_s, dist_dict,cutoff = 6.0):
+    """
+    make a params file for simple_NN
+    """
+    for file in files:
+        with open('params_{}'.format(file),'w') as f:
+            # G2
+            for species in range(1,len(files)+1):
+                for eta, Rs in zip(etas, rs_s):
+                    f.write('2 {} 0 {} {} {} 0.0\n'.format(species, cutoff,
+                                                           np.round(eta, 6), Rs))
+            # G4 
+            for i in range(1,len(files)+1):
+                n = i
+                while True:
+                    for eta in np.logspace(-4,-2,4):
+                        for lamda in [1.0,-1.0]:
+                            for zeta in [1.0,4.0]:
+                                f.write('4 {} {} {} {} {} {}\n'.format(i, n, cutoff,
+                                                                         np.round(eta,6),
+                                                                         zeta, lamda))
+                    n += 1
+                    if n > len(files):
+                        break
+
+
 def convert_to_csv_file(atoms, filename = 'atoms.csv'):
     """
     takes an atoms object and converts it to a csv format: 'x, y, z, atom'
