@@ -517,15 +517,16 @@ def put_water_on_slab(atoms, offset = 1.5):
 
 
 def make_rdf_based_descriptors(images, n_descriptors = 20,
-                               index = 0, descriptor_type = 'simplenn'):
+                               index = 0, cutoff = 6, 
+                               descriptor_type = 'simplenn'):
     """
     generates reasonable values for eta and rs for a given image in a trajectory
     based on the radial distribution function.
     """
     from scipy.integrate import trapz
     from ase.ga.utilities import get_rdf
-    #import matplotlib.pyplot as plt
-    fall_off_percent = 0.05 # arbitrarily chosen
+    import matplotlib.pyplot as plt
+    fall_off_percent = 0.2 # arbitrarily chosen
     localization_distance = 0.2 # arbitrarily chosen
 
     if type(images) == list:
@@ -533,7 +534,7 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
     else:
         atoms = images
 
-    rdf = get_rdf(atoms, rmax = 6, nbins = 50)
+    rdf = get_rdf(atoms, rmax = cutoff, nbins = 50)
     rdf_1, distances = rdf
     # find 75% index
     cut = int(-1 * np.ceil(len(rdf) * 0.75))
@@ -545,24 +546,37 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
     for i in range(len(rdf_1)):
         integrals.append(trapz(rdf_1[:i+1]))
     # divide the integral evenly
-    increment = integrals[-1] / n_descriptors
+    increment = integrals[-1] / (n_descriptors)
     n = 1
     descriptor_distances = []
     for distance, integral in zip(distances, integrals):
         if integral > (n * increment):
             descriptor_distances.append(distance)
             n += 1
+    descriptor_distances[0] -= 0.05 # arbitrarily chosen
     etas = []
     rs_s = [0] * n_descriptors
     for distance in descriptor_distances:
         etas.append(-1 * np.log(fall_off_percent) / distance)
-    for distance in descriptor_distances:
+    for i, distance in enumerate(descriptor_distances):
+        if i == 0:
+            localization_distance = abs(descriptor_distances[i+1] - distance)
+        elif i == len(descriptor_distances) - 1:
+            localization_distance = np.mean(abs(descriptor_distances[i-1] -\
+                                                distance) + cutoff)
+        else:
+            localization_distance = np.mean(abs(descriptor_distances[i+1] - distance) + \
+                                            abs(descriptor_distances[i-1] - distance))
+            localization_distance = abs(descriptor_distances[i+1] - distance)
+        print(localization_distance)
         etas.append(-1 * np.log(fall_off_percent) / localization_distance)
+        rs_s.append(distance - 0.1)
         rs_s.append(distance)
     #plt.scatter(distances, rdf_1)
-    #for distance in descriptor_distances:
-    #    plt.plot([distance]*2, [max(rdf_1),min(rdf_1)])
-    #plt.show()
+    for distance in descriptor_distances:
+        plt.plot([distance]*2, [max(integrals),min(integrals)])
+    plt.plot(distances, integrals)
+    plt.show()
     return etas, rs_s
 
 def make_params_file(files, etas, rs_s, dist_dict,cutoff = 6.0):
@@ -584,7 +598,7 @@ def make_params_file(files, etas, rs_s, dist_dict,cutoff = 6.0):
                         for lamda in [1.0,-1.0]:
                             for zeta in [1.0,4.0]:
                                 f.write('4 {} {} {} {} {} {}\n'.format(i, n, cutoff,
-                                                                         np.round(eta,6),
+                                                                         np.round(eta, 6),
                                                                          zeta, lamda))
                     n += 1
                     if n > len(files):
