@@ -450,7 +450,8 @@ def surround_with_water(atoms, particle_spacing = 8,
     atoms.wrap(pbc = [True] * 3)
     return atoms
 
-def make_wulffish_nanoparticle(atoms, millers, surface_energies, rmax):
+def make_wulffish_nanoparticle(atoms, millers, surface_energies,
+                               rmax, prune = False):
     """
     wraps the nanoparticle generation functionality of MPInterface (link below).
     It's not perfect for complicated structures, but it gets you pretty close.
@@ -484,8 +485,47 @@ def make_wulffish_nanoparticle(atoms, millers, surface_energies, rmax):
     #particle = adaptor.get_atoms(nanoparticle)
     particle = adaptor.get_atoms(nanoparticle.get_boxed_structure(10**6,10**6,10**6))
     particle.set_cell([0] * 3)
-    #nanoparticle.to(fmt='xyz', filename='nanoparticle.xyz')
+    if prune == True:
+        particle = prune_oxygens(particle, metal = 'Ti')
     return particle
+
+def prune_oxygens(atoms, metal = None):
+    """
+    a function that removes all oxygens that have a coordination less
+    that 2 based on a 2.2 A maximum bond distance. This is meant for
+    nanoparticles
+
+    inputs:
+        atoms:
+            the atoms object of the nanoparticle
+        metal:
+            If not set to none, a selected metal atom will also be 
+            checked
+
+    returns:
+        atoms:
+            the new (pruned) atoms object
+    """
+    for i in range(len(atoms)):
+        if atoms[i].symbol == 'O':
+            bond_distance = 2.2
+            minumum_coordination = 2
+        elif metal is not None:
+            if atoms[i].symbol == metal:
+                bond_distance = 3
+                minumum_coordination = 4 # arbitrary
+        search = list(range(len(atoms)))
+        search.remove(i)
+        distances = atoms.get_distances(i, search)
+        mask = distances < bond_distance
+        cn = list(mask).count(True)
+        if cn < minumum_coordination:
+            inds.append(i)
+    for index in inds[::-1]:
+        del atoms[index]
+    return atoms
+
+
 
 def put_water_on_slab(atoms, offset = 1.5):
     """
@@ -518,6 +558,7 @@ def put_water_on_slab(atoms, offset = 1.5):
 
 def make_rdf_based_descriptors(images, n_descriptors = 20,
                                index = 0, cutoff = 6, 
+                               fall_off_percent = 0.1,
                                descriptor_type = 'simplenn'):
     """
     generates reasonable values for eta and rs for a given image in a trajectory
@@ -526,8 +567,8 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
     from scipy.integrate import trapz
     from ase.ga.utilities import get_rdf
     import matplotlib.pyplot as plt
-    fall_off_percent = 0.2 # arbitrarily chosen
-    localization_distance = 0.2 # arbitrarily chosen
+    #fall_off_percent = 0.2 # arbitrarily chosen
+    #localization_distance = 0.2 # arbitrarily chosen
 
     if type(images) == list:
         atoms = images[index]
@@ -568,14 +609,13 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
             localization_distance = np.mean(abs(descriptor_distances[i+1] - distance) + \
                                             abs(descriptor_distances[i-1] - distance))
             localization_distance = abs(descriptor_distances[i+1] - distance)
-        print(localization_distance)
         etas.append(-1 * np.log(fall_off_percent) / localization_distance)
         rs_s.append(distance - 0.1)
         rs_s.append(distance)
-    #plt.scatter(distances, rdf_1)
-    for distance in descriptor_distances:
-        plt.plot([distance]*2, [max(integrals),min(integrals)])
-    plt.plot(distances, integrals)
+    plt.plot(distances, rdf_1)
+    #for distance in descriptor_distances:
+    #    plt.plot([distance]*2, [max(integrals),min(integrals)])
+    #plt.plot(distances, integrals)
     plt.show()
     return etas, rs_s
 
