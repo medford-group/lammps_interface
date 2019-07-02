@@ -450,7 +450,8 @@ def surround_with_water(atoms, particle_spacing = 8,
     atoms.wrap(pbc = [True] * 3)
     return atoms
 
-def make_wulffish_nanoparticle(atoms, millers, surface_energies, rmax):
+def make_wulffish_nanoparticle(atoms, millers, surface_energies,
+                               rmax, prune = False):
     """
     wraps the nanoparticle generation functionality of MPInterface (link below).
     It's not perfect for complicated structures, but it gets you pretty close.
@@ -484,8 +485,47 @@ def make_wulffish_nanoparticle(atoms, millers, surface_energies, rmax):
     #particle = adaptor.get_atoms(nanoparticle)
     particle = adaptor.get_atoms(nanoparticle.get_boxed_structure(10**6,10**6,10**6))
     particle.set_cell([0] * 3)
-    #nanoparticle.to(fmt='xyz', filename='nanoparticle.xyz')
+    if prune == True:
+        particle = prune_oxygens(particle, metal = 'Ti')
     return particle
+
+def prune_oxygens(atoms, metal = None):
+    """
+    a function that removes all oxygens that have a coordination less
+    that 2 based on a 2.2 A maximum bond distance. This is meant for
+    nanoparticles
+
+    inputs:
+        atoms:
+            the atoms object of the nanoparticle
+        metal:
+            If not set to none, a selected metal atom will also be 
+            checked
+
+    returns:
+        atoms:
+            the new (pruned) atoms object
+    """
+    for i in range(len(atoms)):
+        if atoms[i].symbol == 'O':
+            bond_distance = 2.2
+            minumum_coordination = 2
+        elif metal is not None:
+            if atoms[i].symbol == metal:
+                bond_distance = 3
+                minumum_coordination = 4 # arbitrary
+        search = list(range(len(atoms)))
+        search.remove(i)
+        distances = atoms.get_distances(i, search)
+        mask = distances < bond_distance
+        cn = list(mask).count(True)
+        if cn < minumum_coordination:
+            inds.append(i)
+    for index in inds[::-1]:
+        del atoms[index]
+    return atoms
+
+
 
 def put_water_on_slab(atoms, offset = 1.5):
     """
@@ -514,6 +554,96 @@ def put_water_on_slab(atoms, offset = 1.5):
     water_layer.positions += np.array([0, 0, highest_atom + offset])
     slab = atoms + water_layer
     return slab
+
+
+def make_rdf_based_descriptors(images, n_descriptors = 20,
+                               index = 0, cutoff = 6, 
+                               fall_off_percent = 0.1,
+                               descriptor_type = 'simplenn'):
+    """
+    generates reasonable values for eta and rs for a given image in a trajectory
+    based on the radial distribution function.
+    """
+    from scipy.integrate import trapz
+    from ase.ga.utilities import get_rdf
+    import matplotlib.pyplot as plt
+    #fall_off_percent = 0.2 # arbitrarily chosen
+    #localization_distance = 0.2 # arbitrarily chosen
+
+    if type(images) == list:
+        atoms = images[index]
+    else:
+        atoms = images
+
+    rdf = get_rdf(atoms, rmax = cutoff, nbins = 50)
+    rdf_1, distances = rdf
+    # find 75% index
+    cut = int(-1 * np.ceil(len(rdf) * 0.75))
+    rdf_mean = np.mean(rdf_1[cut:])
+    # subtract off the mean and make all positive
+    #rdf_1 -= rdf_mean
+    rdf_1 = abs(rdf_1)
+    integrals = []
+    for i in range(len(rdf_1)):
+        integrals.append(trapz(rdf_1[:i+1]))
+    # divide the integral evenly
+    increment = integrals[-1] / (n_descriptors)
+    n = 1
+    descriptor_distances = []
+    for distance, integral in zip(distances, integrals):
+        if integral > (n * increment):
+            descriptor_distances.append(distance)
+            n += 1
+    descriptor_distances[0] -= 0.05 # arbitrarily chosen
+    etas = []
+    rs_s = [0] * n_descriptors
+    for distance in descriptor_distances:
+        etas.append(-1 * np.log(fall_off_percent) / distance)
+    for i, distance in enumerate(descriptor_distances):
+        if i == 0:
+            localization_distance = abs(descriptor_distances[i+1] - distance)
+        elif i == len(descriptor_distances) - 1:
+            localization_distance = np.mean(abs(descriptor_distances[i-1] -\
+                                                distance) + cutoff)
+        else:
+            localization_distance = np.mean(abs(descriptor_distances[i+1] - distance) + \
+                                            abs(descriptor_distances[i-1] - distance))
+            localization_distance = abs(descriptor_distances[i+1] - distance)
+        etas.append(-1 * np.log(fall_off_percent) / localization_distance)
+        rs_s.append(distance - 0.1)
+        rs_s.append(distance)
+    plt.plot(distances, rdf_1)
+    #for distance in descriptor_distances:
+    #    plt.plot([distance]*2, [max(integrals),min(integrals)])
+    #plt.plot(distances, integrals)
+    plt.show()
+    return etas, rs_s
+
+def make_params_file(files, etas, rs_s, dist_dict,cutoff = 6.0):
+    """
+    make a params file for simple_NN
+    """
+    for file in files:
+        with open('params_{}'.format(file),'w') as f:
+            # G2
+            for species in range(1,len(files)+1):
+                for eta, Rs in zip(etas, rs_s):
+                    f.write('2 {} 0 {} {} {} 0.0\n'.format(species, cutoff,
+                                                           np.round(eta, 6), Rs))
+            # G4 
+            for i in range(1,len(files)+1):
+                n = i
+                while True:
+                    for eta in np.logspace(-4,-2,4):
+                        for lamda in [1.0,-1.0]:
+                            for zeta in [1.0,4.0]:
+                                f.write('4 {} {} {} {} {} {}\n'.format(i, n, cutoff,
+                                                                         np.round(eta, 6),
+                                                                         zeta, lamda))
+                    n += 1
+                    if n > len(files):
+                        break
+
 
 def convert_to_csv_file(atoms, filename = 'atoms.csv'):
     """

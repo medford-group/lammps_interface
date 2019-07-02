@@ -2,8 +2,11 @@ from pymatgen.analysis.wulff import WulffShape
 from pymatgen.io.ase import AseAtomsAdaptor as ad
 from ase.spacegroup import crystal
 import numpy as np
-from lammps_interface.convience_tools import make_wulffish_nanoparticle, surround_with_water 
+from lammps_interface.tools import make_wulffish_nanoparticle, surround_with_water 
 from ase.visualize import view
+from ase.neighborlist import neighbor_list
+from ase.geometry.analysis import Analysis
+from pymatgen.analysis.local_env import CrystalNN, NearNeighbors
 
 
 # some parameters
@@ -17,11 +20,13 @@ rutile =crystal(['Ti', 'O'], basis=[(0, 0, 0), (0.3, 0.3, 0.0)],
                 spacegroup=136, cellpar=[a, a, c, 90, 90, 90])
 
 atoms = make_wulffish_nanoparticle(rutile, millers = hkl_family,
-                                    surface_energies = surface_energies, rmax = 20)
+                                    surface_energies = surface_energies,
+                                    rmax = 24, prune = True)
 
-print('here here here\n\n\n')
+
+
 view(atoms)
-wet_rutile = surround_with_water(atoms)
+#wet_rutile = surround_with_water(atoms)
 
-wet_rutile.write('nanoparticle.traj')
+#wet_rutile.write('nanoparticle.traj')
 
