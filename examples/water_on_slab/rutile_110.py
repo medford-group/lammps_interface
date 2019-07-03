@@ -1,7 +1,7 @@
 from pymatgen.io.ase import AseAtomsAdaptor as adaptor
 from ase.spacegroup import crystal
 import numpy as np
-from lammps_interface.convience_tools import make_wulffish_nanoparticle, surround_with_water,put_water_on_slab
+from lammps_interface.tools import make_wulffish_nanoparticle, surround_with_water,put_water_on_slab
 from ase.visualize import view
 from pymatgen.core.surface import generate_all_slabs, SlabGenerator
 
@@ -20,14 +20,15 @@ rutile =crystal(['Ti', 'O'], basis=[(0, 0, 0), (0.3, 0.3, 0.0)],
 structure = adaptor.get_structure(rutile)
 # generate the slab
 gen = SlabGenerator(structure, miller_index = (1,1,0), lll_reduce = True,
-                    min_slab_size = 10, min_vacuum_size = 20)
+                    min_slab_size = 15, min_vacuum_size = 20)
 
 slab = gen.get_slabs()
 
 
-slab = adaptor.get_atoms(slab[1].get_orthogonal_c_slab()) * (3,3,1)
-slab.center()
-slab.write('rutile_110.traj')
-slab = put_water_on_slab(slab)
-slab.write('water_rutile_110.traj')
-view(slab)
+for n in range(2,7):
+    slab_n = adaptor.get_atoms(slab[1].get_orthogonal_c_slab()) * (n+1,n,1)
+    #slab.center()
+    slab_n.write('rutile_110.traj')
+    slab_n = put_water_on_slab(slab_n, offset = 1)
+    slab_n.write(str(n) + '_water_rutile_110.traj')
+    #view(slab)

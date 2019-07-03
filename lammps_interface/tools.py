@@ -12,6 +12,7 @@ from ase import io
 from pymatgen.io.ase import AseAtomsAdaptor as adaptor
 from ase.spacegroup import crystal
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+from shutil import copyfile
 
 force_fields = {'tip3p_2004':'TIP3P_2004','tip3p_1983_charmm_hybrid':'tip3p_1983_charmm_hybrid'}
 
@@ -384,12 +385,22 @@ def make_standard_input(calculation_type = 'reaxff',
                                                      timestep, 
                                                      temp, 
                                                      steps))
+    if calculation_type == 'reaxff':
+        import inspect
+        cwd = os.getcwd()
+        package_directory = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe()))))
+        ff = os.path.join(package_directory, 'special_input_files/' + ff_file)
+        control = os.path.join(package_directory, 'special_input_files/control.reaxff')
+        copyfile(ff, cwd)
+        copyfile(control, cwd)
+
     
     
 
-def surround_with_water(atoms, particle_spacing = 8,
-                        metal = 'Ti', shape = 'spherical',
-                        shape_factor = 0.9):
+def surround_with_molecules(atoms, particle_spacing = 8, 
+                            fluid_molecule = 'H2O', molar_density = 55.5556,
+                            metal = 'Ti', shape = 'spherical',
+                            shape_factor = 0.9):
     """
     takes in an object (usually a nano-particle) and surrounds it with water 
     molecules at approximately the right for room temperature density. It assumes 
@@ -400,6 +411,10 @@ def surround_with_water(atoms, particle_spacing = 8,
             the atoms object you'd like to surround with water
         particle_spacing:
             how much spacing you'd like around the particle
+        fluid_molecule:
+            The molecule you want to cover your slab with, can be either an atoms object
+            or a string (must be in the g2 set if it is a string)
+
         metal:
             If you have a particular atom you'd like centered, in the middle
             of the cell, input it here
@@ -418,6 +433,15 @@ def surround_with_water(atoms, particle_spacing = 8,
     """
     from ase.build import molecule
     from ase.atoms import Atoms
+    from ase.units import mol, m
+    if type(fluid_molecule)
+        fluid_molecule = molecule(fluid_molecule)
+
+    # Figure out what molecule is provided
+    if type(fluid_molecule) == str:
+        fluid_molecule = molecule(fluid_molecule)
+    # Calculate number density
+    number_density = molar_density * 1000 * mol / m ** 3
     d = []
     for dimension in range(3):
         smallest_value = min(atoms.positions[:, dimension])
@@ -433,11 +457,11 @@ def surround_with_water(atoms, particle_spacing = 8,
         volume = np.product(d)
     volume *= shape_factor
 
-    number_of_waters = int(np.floor((atoms.get_volume() - (d) ** 3) * 0.0333679)) # approximate density of water
+    number_of_molecules = int(np.floor((atoms.get_volume() - (d) ** 3) * 0.0333679)) # approximate density of water
 
     # this next part is such a mess, I'm so sorry
     # all this is doing is trying to make the particle more centered in the unit cell
-    atoms = make_box_of_molecules([molecule('H2O'),atoms], [number_of_waters,1], atoms.cell)
+    atoms = make_box_of_molecules([fluid_molecule,atoms], [number_of_molecules,1], atoms.cell)
     metal_s = [a for a in atoms if a.symbol == metal]
     metal_object = Atoms(cell = atoms.cell)
     for atom in metal_s:
@@ -506,6 +530,7 @@ def prune_oxygens(atoms, metal = None):
         atoms:
             the new (pruned) atoms object
     """
+    inds = []
     for i in range(len(atoms)):
         if atoms[i].symbol == 'O':
             bond_distance = 2.2
@@ -527,7 +552,9 @@ def prune_oxygens(atoms, metal = None):
 
 
 
-def put_water_on_slab(atoms, offset = 1.5):
+def put_molecules_on_slab(atoms, offset = 1.5, 
+                         molar_density = 55.55556,
+                         fluid_molecule = 'H2O'):
     """
     overlays a water layer on top of a slab. This does not care about what the physics
     of water on this slab should be, it just puts some waters above it from packmol. The
@@ -538,19 +565,33 @@ def put_water_on_slab(atoms, offset = 1.5):
             the atoms object of the slab
         offset:
             how far the water layer should be offset
+        molar_density:
+            the molar density (mol/L) of the water you'd like to put on the slab
+        fluid_molecule:
+            The molecule you want to cover your slab with, can be either an atoms object
+            or a string (must be in the g2 set if it is a string)
 
     returns:
         slab:
             the water covered slab
     """
     from ase.build import molecule
+    from ase.units import mol, m
+    
+    # Figure out what molecule is provided
+    if type(fluid_molecule) == str:
+        fluid_molecule = molecule(fluid_molecule)
+    # Calculate number density
+    number_density = molar_density * 1000 * mol / m ** 3
+    # Find dimensions of the box
     highest_atom = max(atoms.positions[:,2])
     length, width, top_of_cell = atoms.cell[0,0], atoms.cell[1,1],atoms.cell[2,2]
     height = top_of_cell - highest_atom
     volume = length * width * height
-    number_of_waters = int(np.floor(volume * 0.0333679))
-    water_layer = make_box_of_molecules([molecule('H2O')], [number_of_waters],
-                                        box = [length, width, height - offset])
+    number_of_molecules = int(np.ceil(volume * number_density)) # rounding up by default
+    # Make the box
+    water_layer = make_box_of_molecules([fluid_molecule], [number_of_molecules],
+                                        box = [length, width, height - offset * 2])
     water_layer.positions += np.array([0, 0, highest_atom + offset])
     slab = atoms + water_layer
     return slab
@@ -566,7 +607,7 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
     """
     from scipy.integrate import trapz
     from ase.ga.utilities import get_rdf
-    import matplotlib.pyplot as plt
+    #import matplotlib.pyplot as plt
     #fall_off_percent = 0.2 # arbitrarily chosen
     #localization_distance = 0.2 # arbitrarily chosen
 
@@ -612,11 +653,11 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
         etas.append(-1 * np.log(fall_off_percent) / localization_distance)
         rs_s.append(distance - 0.1)
         rs_s.append(distance)
-    plt.plot(distances, rdf_1)
+    #plt.plot(distances, rdf_1)
     #for distance in descriptor_distances:
     #    plt.plot([distance]*2, [max(integrals),min(integrals)])
     #plt.plot(distances, integrals)
-    plt.show()
+    #plt.show()
     return etas, rs_s
 
 def make_params_file(files, etas, rs_s, dist_dict,cutoff = 6.0):
