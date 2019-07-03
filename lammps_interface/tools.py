@@ -388,7 +388,7 @@ def make_standard_input(calculation_type = 'reaxff',
     if calculation_type == 'reaxff':
         import inspect
         cwd = os.getcwd()
-        package_directory = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe()))))
+        package_directory = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
         ff = os.path.join(package_directory, 'special_input_files/' + ff_file)
         control = os.path.join(package_directory, 'special_input_files/control.reaxff')
         copyfile(ff, cwd)
@@ -434,7 +434,7 @@ def surround_with_molecules(atoms, particle_spacing = 8,
     from ase.build import molecule
     from ase.atoms import Atoms
     from ase.units import mol, m
-    if type(fluid_molecule)
+    if type(fluid_molecule) == str:
         fluid_molecule = molecule(fluid_molecule)
 
     # Figure out what molecule is provided
@@ -598,16 +598,16 @@ def put_molecules_on_slab(atoms, offset = 1.5,
 
 
 def make_rdf_based_descriptors(images, n_descriptors = 20,
-                               index = 0, cutoff = 6, 
-                               fall_off_percent = 0.1,
-                               descriptor_type = 'simplenn'):
+                               index = 0, cutoff = 6.5, 
+                               fall_off_percent = 0.01,
+                               descriptor_type = 'simplenn',
+                               plot = False):
     """
     generates reasonable values for eta and rs for a given image in a trajectory
     based on the radial distribution function.
     """
     from scipy.integrate import trapz
     from ase.ga.utilities import get_rdf
-    #import matplotlib.pyplot as plt
     #fall_off_percent = 0.2 # arbitrarily chosen
     #localization_distance = 0.2 # arbitrarily chosen
 
@@ -616,7 +616,7 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
     else:
         atoms = images
 
-    rdf = get_rdf(atoms, rmax = cutoff, nbins = 50)
+    rdf = get_rdf(atoms, rmax = cutoff, nbins = 200)
     rdf_1, distances = rdf
     # find 75% index
     cut = int(-1 * np.ceil(len(rdf) * 0.75))
@@ -628,36 +628,40 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
     for i in range(len(rdf_1)):
         integrals.append(trapz(rdf_1[:i+1]))
     # divide the integral evenly
-    increment = integrals[-1] / (n_descriptors)
+    increment = integrals[-1] / (n_descriptors + 1)
     n = 1
     descriptor_distances = []
     for distance, integral in zip(distances, integrals):
         if integral > (n * increment):
             descriptor_distances.append(distance)
             n += 1
-    descriptor_distances[0] -= 0.05 # arbitrarily chosen
+            if len(descriptor_distances) == n_descriptors:
+                break
     etas = []
     rs_s = [0] * n_descriptors
     for distance in descriptor_distances:
-        etas.append(-1 * np.log(fall_off_percent) / distance)
+        etas.append(-1 * np.log(0.1) / distance ** 2)
     for i, distance in enumerate(descriptor_distances):
         if i == 0:
             localization_distance = abs(descriptor_distances[i+1] - distance)
         elif i == len(descriptor_distances) - 1:
-            localization_distance = np.mean(abs(descriptor_distances[i-1] -\
-                                                distance) + cutoff)
+            localization_distance = (abs(descriptor_distances[i-1] -\
+                                        distance) + abs(cutoff - distance)) / 2
         else:
-            localization_distance = np.mean(abs(descriptor_distances[i+1] - distance) + \
-                                            abs(descriptor_distances[i-1] - distance))
-            localization_distance = abs(descriptor_distances[i+1] - distance)
-        etas.append(-1 * np.log(fall_off_percent) / localization_distance)
-        rs_s.append(distance - 0.1)
+            localization_distance = (abs(descriptor_distances[i+1] - distance) +\
+                                    abs(descriptor_distances[i-1] - distance)) / 2
+            #localization_distance = abs(descriptor_distances[i+1] - distance)
+        etas.append(-1 * np.log(fall_off_percent) / localization_distance ** 2)
+        #rs_s.append(distance - 0.1)
         rs_s.append(distance)
-    #plt.plot(distances, rdf_1)
-    #for distance in descriptor_distances:
-    #    plt.plot([distance]*2, [max(integrals),min(integrals)])
-    #plt.plot(distances, integrals)
-    #plt.show()
+    if plot == True:
+        import matplotlib.pyplot as plt
+        plt.plot(distances, rdf_1)
+        for rs, eta in zip(rs_s, etas):
+            x = np.linspace(0,cutoff,1000)
+            y = [np.exp(-1 * eta * (a - rs) ** 2) for a in x]
+            plt.plot(x,y)
+        plt.show()
     return etas, rs_s
 
 def make_params_file(files, etas, rs_s, dist_dict,cutoff = 6.0):
