@@ -663,39 +663,75 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
     return etas, rs_s
 
 
-def gaussian_basis(a, x, xk, sigma):
-    return a * np.exp( -1 * ((x - xk) ** 2 / (2 * sigma ** 2))
+def gaussian_basis(x, a, xk, sigma):
+    """
+    a: the aplitude
+    xk: the x offset
+    sigma: the standard deviation
+    """
+    return a * np.exp( -1 * ((x - xk) ** 2 / (2 * sigma ** 2)))
 
-def n_sized_gaussian(a)
-    n = len(a) / 4
+def n_sized_gaussian(x, *a):
+    n = int(len(a) / 3)
     a = np.array(a)
-    a = np.reshape(a,(4,n))
- 
+    a = np.reshape(a, (n, 3))
+    s = 0
+    for row in a:
+        s += gaussian_basis(x, *list(row))
+    return s
 
-def gaussian_fit_descriptors(atoms):
+
+def gaussian_fit_descriptors(atoms, n = 5, cutoff = 6.5, plot = False):
+    """
+    approximates the RDF using a sum of gaussian functions then uses the centers
+    and standard deviations of those gaussians to generate descriptors.
+    """
     from ase.ga.utilities import get_rdf
+    from scipy.optimize import curve_fit
 
-    if type(images) == list:
-        atoms = images[index]
-    else:
-        atoms = images
+    if type(atoms) == list:
+        atoms = atoms[index]
 
     rdf = get_rdf(atoms, rmax = cutoff, nbins = 200)
     rdf, distances = rdf
+    # cut off anything smaller than 0.8 A:
+    distances_2 = [a for a in distances if a > 0.8]
+    index = list(distances).index(distances_2[0])
+    rdf = rdf[index:]
+    distances = distances_2
+
+    a0 = np.array([7,1.,0.2]) + np.random.random(3) * 0.01 # a good first guess
+    if n > 1:
+        a0 = np.append(a0, np.array([2,1.5,0.5]) + np.random.random(3) * 0.01)
+    if n > 2:
+        a0 = np.append(a0, np.random.random((n - 2) * 3) * np.array([2, 2, 0.1] * (n - 2)) + \
+                                   np.array([1.2, 3, 0.5] * (n - 2)))
+    #a0 = np.random.random((n-1) * 3) * np.array([8, 3, 1] * n) + \
+    #                               np.array([1.2, 1.5, 0.5] * n)
+
+    a0 = list(a0)
+    #s = n_sized_gaussian(1, *a0)
+    opt_params, covariance = curve_fit(n_sized_gaussian, distances, rdf,
+                                       p0 = a0,
+                                       maxfev = 10 **6 # Allow tons of evaluations
+                                       )
+
+    if plot == True:
+        from matplotlib import pyplot as plt
+        plt.plot(distances, rdf)
+        plt.plot(distances, n_sized_gaussian(distances, *opt_params))
+        plt.plot(distances, n_sized_gaussian(distances, *a0))
+        plt.show()
 
 
-
-
-
-
-def make_params_file(files, etas, rs_s, dist_dict,cutoff = 6.5):
+def make_params_file(files, etas, rs_s, dist_dict, n_g4_eta = 4  cutoff = 6.5):
     """
     make a params file for simple_NN
     """
     for file in files:
         with open('params_{}'.format(file),'w') as f:
             # G2
-            for species in range(1,len(files)+1):
+            for species in range(1, len(files) + 1):
                 for eta, Rs in zip(etas, rs_s):
                     f.write('2 {} 0 {} {} {} 0.0\n'.format(species, cutoff,
                                                            np.round(eta, 6), Rs))
@@ -703,9 +739,9 @@ def make_params_file(files, etas, rs_s, dist_dict,cutoff = 6.5):
             for i in range(1,len(files)+1):
                 n = i
                 while True:
-                    for eta in np.linspace(0.0001, 0.1, num = 7):
-                        for lamda in [1.0,-1.0]:
-                            for zeta in [1.0,4.0]:
+                    for eta in np.logspace(-5, -1, num = n_g4_eta):
+                        for lamda in [1.0, -1.0]:
+                            for zeta in [1.0, 4.0, 16.0]:
                                 f.write('4 {} {} {} {} {} {}\n'.format(i, n, cutoff,
                                                                          np.round(eta, 6),
                                                                          zeta, lamda))
