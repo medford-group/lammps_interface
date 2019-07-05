@@ -608,8 +608,6 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
     """
     from scipy.integrate import trapz
     from ase.ga.utilities import get_rdf
-    #fall_off_percent = 0.2 # arbitrarily chosen
-    #localization_distance = 0.2 # arbitrarily chosen
 
     if type(images) == list:
         atoms = images[index]
@@ -664,7 +662,33 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
         plt.show()
     return etas, rs_s
 
-def make_params_file(files, etas, rs_s, dist_dict,cutoff = 6.0):
+
+def gaussian_basis(a, x, xk, sigma):
+    return a * np.exp( -1 * ((x - xk) ** 2 / (2 * sigma ** 2))
+
+def n_sized_gaussian(a)
+    n = len(a) / 4
+    a = np.array(a)
+    a = np.reshape(a,(4,n))
+ 
+
+def gaussian_fit_descriptors(atoms):
+    from ase.ga.utilities import get_rdf
+
+    if type(images) == list:
+        atoms = images[index]
+    else:
+        atoms = images
+
+    rdf = get_rdf(atoms, rmax = cutoff, nbins = 200)
+    rdf, distances = rdf
+
+
+
+
+
+
+def make_params_file(files, etas, rs_s, dist_dict,cutoff = 6.5):
     """
     make a params file for simple_NN
     """
@@ -679,7 +703,7 @@ def make_params_file(files, etas, rs_s, dist_dict,cutoff = 6.0):
             for i in range(1,len(files)+1):
                 n = i
                 while True:
-                    for eta in np.logspace(-4,-2,4):
+                    for eta in np.linspace(0.0001, 0.1, num = 7):
                         for lamda in [1.0,-1.0]:
                             for zeta in [1.0,4.0]:
                                 f.write('4 {} {} {} {} {} {}\n'.format(i, n, cutoff,
