@@ -601,6 +601,7 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
                                index = 0, cutoff = 6.5, 
                                fall_off_percent = 0.01,
                                descriptor_type = 'simplenn',
+                               nbins = 200,
                                plot = False):
     """
     generates reasonable values for eta and rs for a given image in a trajectory
@@ -608,23 +609,38 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
     """
     from scipy.integrate import trapz
     from ase.ga.utilities import get_rdf
+    from ase.geometry.analysis import Analysis
 
     if type(images) == list:
         atoms = images[index]
     else:
         atoms = images
 
-    rdf = get_rdf(atoms, rmax = cutoff, nbins = 200)
-    rdf_1, distances = rdf
+    analysis = Analysis(images)
+    rdf = analysis.get_rdf(rmax = cutoff, nbins = nbins,
+                           return_dists = True
+                           )
+
+    total_rdf = np.empty((nbins,), dtype = 'float64')
+    for image, distances in rdf:
+        total_rdf += image
+    total_rdf /= len(rdf)
+    rdf = total_rdf
+
+    #rdf = get_rdf(atoms, rmax = cutoff, nbins = 200)
+    #rdf_1, distances = rdf
+    # ignore the stupid code in the next few lines
+    """
     # find 75% index
     cut = int(-1 * np.ceil(len(rdf) * 0.75))
     rdf_mean = np.mean(rdf_1[cut:])
     # subtract off the mean and make all positive
     #rdf_1 -= rdf_mean
     rdf_1 = abs(rdf_1)
+    """
     integrals = []
-    for i in range(len(rdf_1)):
-        integrals.append(trapz(rdf_1[:i+1]))
+    for i in range(len(rdf)):
+        integrals.append(trapz(rdf[:i+1]))
     # divide the integral evenly
     increment = integrals[-1] / (n_descriptors + 1)
     n = 1
@@ -635,6 +651,7 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
             n += 1
             if len(descriptor_distances) == n_descriptors:
                 break
+    descriptor_distances[0] -= 0.08 # offset the first one slightly
     etas = []
     rs_s = [0] * n_descriptors
     for distance in descriptor_distances:
@@ -654,7 +671,7 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
         rs_s.append(distance)
     if plot == True:
         import matplotlib.pyplot as plt
-        plt.plot(distances, rdf_1)
+        plt.plot(distances, rdf)
         for rs, eta in zip(rs_s, etas):
             x = np.linspace(0,cutoff,1000)
             y = [np.exp(-1 * eta * (a - rs) ** 2) for a in x]
@@ -681,50 +698,92 @@ def n_sized_gaussian(x, *a):
     return s
 
 
-def gaussian_fit_descriptors(atoms, n = 5, cutoff = 6.5, plot = False):
+def gaussian_fit_descriptors(traj, n_gaussians = 5, cutoff = 6.5, nbins = 10, plot = False):
     """
     approximates the RDF using a sum of gaussian functions then uses the centers
     and standard deviations of those gaussians to generate descriptors.
     """
     from ase.ga.utilities import get_rdf
     from scipy.optimize import curve_fit
+    from sklearn.neighbors import KernelDensity
+    from ase.geometry.analysis import Analysis
 
-    if type(atoms) == list:
-        atoms = atoms[index]
 
-    rdf = get_rdf(atoms, rmax = cutoff, nbins = 200)
-    rdf, distances = rdf
-    # cut off anything smaller than 0.8 A:
+    n = n_gaussians
+
+    atoms = traj[0]
+    
+    full_dists = []
+    for i in range(len(atoms)):
+        indices = list(range(len(atoms)))
+        indices.remove(i)
+        dists = atoms.get_distances(i, indices)
+        dists = [a for a in dists if a < cutoff]
+        full_dists += dists
+
+    full_dists = np.array(full_dists)
+    full_dists = full_dists.reshape((len(full_dists), 1))
+
+    kde = KernelDensity(kernel='gaussian',bandwidth=0.2).fit(full_dists)
+    dens = kde.score_samples(np.reshape(np.linspace(0.8,cutoff,1000), (1000, 1)))
+
+    analysis = Analysis(traj)
+    rdf = analysis.get_rdf(rmax = cutoff, nbins = nbins, 
+                           return_dists = True
+                           )
+
+    total_rdf = np.empty((nbins,), dtype = 'float64')
+    for image, distances in rdf:
+        total_rdf += image
+    total_rdf /= len(rdf)
+
+
+    # cut off anything smaller than 0.8 A for stability
     distances_2 = [a for a in distances if a > 0.8]
     index = list(distances).index(distances_2[0])
-    rdf = rdf[index:]
+    total_rdf = total_rdf[index:]
     distances = distances_2
+    del distances_2
 
-    a0 = np.array([7,1.,0.2]) + np.random.random(3) * 0.01 # a good first guess
-    if n > 1:
-        a0 = np.append(a0, np.array([2,1.5,0.5]) + np.random.random(3) * 0.01)
-    if n > 2:
-        a0 = np.append(a0, np.random.random((n - 2) * 3) * np.array([2, 2, 0.1] * (n - 2)) + \
-                                   np.array([1.2, 3, 0.5] * (n - 2)))
-    #a0 = np.random.random((n-1) * 3) * np.array([8, 3, 1] * n) + \
-    #                               np.array([1.2, 1.5, 0.5] * n)
+    tries = 0
+    while tries < 1000:
 
-    a0 = list(a0)
-    #s = n_sized_gaussian(1, *a0)
-    opt_params, covariance = curve_fit(n_sized_gaussian, distances, rdf,
+        a0 = np.array([7,1.,0.2]) + np.random.random(3) * 0.01 # a good first guess
+        if n > 1:
+            a0 = np.append(a0, np.array([2,1.6,0.5]) + np.random.random(3) * 0.01)
+        if n > 2:
+            a0 = np.append(a0, np.random.random((n - 2) * 3) * np.array([2, 2, 0.1] * (n - 2)) + \
+                                   np.array([1.2, 2, 0.2] * (n - 2)))
+
+        a0 = list(a0)
+        try:
+            opt_params, covariance = curve_fit(n_sized_gaussian, distances, total_rdf,
                                        p0 = a0,
-                                       maxfev = 10 **6 # Allow tons of evaluations
+                                       maxfev = 10 ** 3 # Allow tons of evaluations
                                        )
+        except RuntimeError:
+            tries += 1
+    sigmas = opt_params[1::3]
+    rs_s = opt_params[0::3]
+
+    # this this the relationship between sigma and eta
+    etas = [1 / (2 * a ** 2) for a in sigmas]
+    print(etas, rs_s)
 
     if plot == True:
         from matplotlib import pyplot as plt
-        plt.plot(distances, rdf)
+        plt.plot(distances, total_rdf)
+        #plt.plot(np.linspace(0.8,cutoff,1000), dens)
         plt.plot(distances, n_sized_gaussian(distances, *opt_params))
-        plt.plot(distances, n_sized_gaussian(distances, *a0))
+        for rs, eta in zip(rs_s, etas):
+            x = np.linspace(0,cutoff,1000)
+            y = [np.exp(-1 * eta * (a - rs) ** 2) for a in x]
+            plt.plot(x,y)
+        #plt.plot(distances, n_sized_gaussian(distances, *a0))
         plt.show()
 
 
-def make_params_file(files, etas, rs_s, dist_dict, n_g4_eta = 4  cutoff = 6.5):
+def make_params_file(files, etas, rs_s, dist_dict, n_g4_eta = 4, cutoff = 6.5):
     """
     make a params file for simple_NN
     """
