@@ -17,7 +17,8 @@ from shutil import copyfile
 force_fields = {'tip3p_2004':'TIP3P_2004','tip3p_1983_charmm_hybrid':'tip3p_1983_charmm_hybrid'}
 
 def make_box_of_molecules(molecules, num_molecules, box,
-                          tolerance=2.0, outputfile='box.pdb',
+                          tolerance = 2.0, outputfile = 'box.pdb',
+                          clean_folder = True,
                           radius = None):
     """
     This function makes a box of molecules suitable for use in
@@ -76,8 +77,9 @@ def make_box_of_molecules(molecules, num_molecules, box,
     f.close()
     os.system('packmol < pk.inp > pk.log')
     atoms = io.read(outputfile)
-    atoms.cell = box    
-    os.system('rm pk* *.pdb')
+    atoms.cell = box
+    if clean_folder == True:
+        os.system('rm pk* *.pdb')
     return atoms
 
 def write_lammps_inputs_moltemplate(atoms, force_field, num_molecules):
