@@ -393,8 +393,8 @@ def make_standard_input(calculation_type = 'reaxff',
         package_directory = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
         ff = os.path.join(package_directory, 'special_input_files/' + ff_file)
         control = os.path.join(package_directory, 'special_input_files/control.reaxff')
-        copyfile(ff, cwd)
-        copyfile(control, cwd)
+        copyfile(ff, os.path.join(cwd, ff_file))
+        copyfile(control, os.path.join(cwd, 'control.reaxff'))
 
     
     
@@ -558,6 +558,7 @@ def put_molecules_on_slab(atoms, offset = 1.5,
                          molar_density = 55.55556,
                          fluid_molecule = 'H2O'):
     """
+    TODO: make this code work for non-orthogonal slabs
     overlays a water layer on top of a slab. This does not care about what the physics
     of water on this slab should be, it just puts some waters above it from packmol. The
     cell of the slab should be a orthogonal
@@ -591,6 +592,9 @@ def put_molecules_on_slab(atoms, offset = 1.5,
     height = top_of_cell - highest_atom
     volume = length * width * height
     number_of_molecules = int(np.ceil(volume * number_density)) # rounding up by default
+    if number_of_molecules < 0:
+        raise ValueError('A negative number of fluid molecules was calculated.'
+                         ' Make sure your slab has a vacuum layer')
     # Make the box
     water_layer = make_box_of_molecules([fluid_molecule], [number_of_molecules],
                                         box = [length, width, height - offset * 2])
