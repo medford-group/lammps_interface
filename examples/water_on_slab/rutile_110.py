@@ -1,7 +1,7 @@
 from pymatgen.io.ase import AseAtomsAdaptor as adaptor
 from ase.spacegroup import crystal
 import numpy as np
-from lammps_interface.tools import make_wulffish_nanoparticle, surround_with_water,put_water_on_slab
+from lammps_interface.tools import make_wulffish_nanoparticle, put_molecules_on_slab
 from ase.visualize import view
 from pymatgen.core.surface import generate_all_slabs, SlabGenerator
 
@@ -29,6 +29,6 @@ for n in range(2,7):
     slab_n = adaptor.get_atoms(slab[1].get_orthogonal_c_slab()) * (n+1,n,1)
     #slab.center()
     slab_n.write('rutile_110.traj')
-    slab_n = put_water_on_slab(slab_n, offset = 1)
+    slab_n = put_molecules_on_slab(slab_n, offset = 1)
     slab_n.write(str(n) + '_water_rutile_110.traj')
     #view(slab)

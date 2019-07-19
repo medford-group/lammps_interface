@@ -657,7 +657,7 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
     etas = []
     rs_s = [0] * n_descriptors
     for distance in descriptor_distances:
-        etas.append(-1 * np.log(0.1) / distance ** 2)
+        etas.append(-1 * np.log(0.01) / distance ** 2)
     for i, distance in enumerate(descriptor_distances):
         if i == 0:
             localization_distance = abs(descriptor_distances[i+1] - distance)
@@ -810,6 +810,48 @@ def make_params_file(files, etas, rs_s, dist_dict, n_g4_eta = 4, cutoff = 6.5):
                     if n > len(files):
                         break
 
+def extract_rdf(filename, plot = False):
+    """
+    pulls the rdf data out of the structured LAMMPS output and
+    converts it to a pandas dataframe, optionally plotting it.
+
+    inputs:
+        filename:
+            the name of the rdf file
+        plot:
+            if set the True, it will plot the first RDF
+
+    returns:
+        None
+    """
+    import pandas as pd
+    from io import StringIO
+    with open(filename, 'r') as f:
+        text = f.read()
+    rdfs = text.split('# TimeStep Number-of-rows\n')[1:]
+    rdf_dfs = []
+    for rdf in rdfs:
+        rdf = rdf.replace('# ', '')
+        rdf = rdf.split('\n')
+        del rdf[1]
+        if '#' in rdf[-1]:
+            del rdf[-1]
+        rdf = '\n'.join(rdf)
+        data = StringIO(rdf)
+        df = pd.read_csv(data, sep = ' ')
+        rdf_dfs.append(df)
+
+    if plot == True:
+        import matplotlib.pyplot as plt
+        plt.plot(df['c_myRDF[1]'],df['c_myRDF[2]'])
+        plt.title('Radial Distribution Function Water Reaxff')
+        plt.ylabel('g(r)')
+        plt.xlabel('r ($\AA$)')
+        plt.show()
+
+    return df
+
+
 
 def convert_to_csv_file(atoms, filename = 'atoms.csv'):
     """
@@ -829,3 +871,57 @@ def convert_to_csv_file(atoms, filename = 'atoms.csv'):
             x, y, z = atom.position
             f.write('{}, {}, {}, {}\n'.format(x,y,z,atom.symbol))
 
+def kernel_density_radial_distribution_function(traj, bandwidth = 0.2, 
+                                                cutoff = 6.5, 
+                                                nbins = 100,
+                                                plot = False):
+    """
+    approximates the RDF using kernel density estimation
+    """
+    from ase.ga.utilities import get_rdf
+    from scipy.optimize import curve_fit
+    from sklearn.neighbors import KernelDensity
+    from ase.geometry.analysis import Analysis
+
+    if type(traj) != list:
+        traj = [traj]
+
+    full_dists = []
+    for atoms in traj:
+        for i in range(len(atoms)):
+            indices = list(range(len(atoms)))
+            indices.remove(i)
+            dists = atoms.get_distances(i, indices)
+            dists = [a for a in dists if a < cutoff]
+            full_dists += dists
+
+    full_dists = np.array(full_dists)
+    full_dists = full_dists.reshape((len(full_dists), 1))
+
+
+    analysis = Analysis(traj)
+    rdf = analysis.get_rdf(rmax = cutoff, nbins = nbins,
+                           return_dists = True
+                           )
+
+    total_rdf = np.empty((nbins,), dtype = 'float64')
+    for image, distances in rdf:
+        total_rdf += image
+    total_rdf /= len(rdf)
+
+
+    distances_kde = np.linspace(0.7, cutoff, 1000)
+
+    kde = KernelDensity(kernel='epanechnikov', bandwidth = bandwidth).fit(full_dists)
+    dens = kde.score_samples(np.reshape(distances_kde, (1000, 1)))
+
+    dens -= min(dens)
+
+    #for i, d in enumerate(dens):
+    #    dens[i] = d / distances_kde[i] ** 2 / np.pi
+
+    if plot == True:
+        from matplotlib import pyplot as plt
+        plt.plot(distances, total_rdf)
+        plt.plot(np.linspace(0.7,cutoff,1000), dens)
+        plt.show()
