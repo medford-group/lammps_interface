@@ -1,5 +1,5 @@
 from ase.build import molecule
-from convience_tools import make_box_of_molecules, write_lammps_inputs_moltemplate
+from tools import make_box_of_molecules, write_lammps_inputs_moltemplate
 import os
 
 mol = molecule('H2O')

@@ -7,6 +7,6 @@ install:
   - pip install -r requirements.txt
   - pip install .
 script:
-  - python3 examples/water_on_slab/rutile110.py 
-  - python3 examples/water_box/build.py
-  - python3 examples/nanoparticle/wulff.py
+  - python3 ./examples/water_on_slab/rutile_110.py 
+  - python3 ./examples/water_box/build.py
+  - python3 ./examples/nanoparticle/wulff.py
