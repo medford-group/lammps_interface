@@ -1,6 +1,14 @@
 language: python
+os:
+  - linux
 rvm:
- - 3.6
+  - 3.6
+addons:
+  apt:
+    sources:
+    - ubuntu-toolchain-r-test
+    packages:
+    - gfortran
 before_install:
   - export PATH=./lammps_interface/bin:$PATH
 install:
