@@ -2,7 +2,7 @@ from pymatgen.analysis.wulff import WulffShape
 from pymatgen.io.ase import AseAtomsAdaptor as ad
 from ase.spacegroup import crystal
 import numpy as np
-from lammps_interface.tools import make_wulffish_nanoparticle, surround_with_water 
+from lammps_interface.tools import make_wulffish_nanoparticle, surround_with_molecules
 from ase.visualize import view
 from ase.neighborlist import neighbor_list
 from pymatgen.analysis.local_env import CrystalNN, NearNeighbors
@@ -25,7 +25,7 @@ atoms = make_wulffish_nanoparticle(rutile, millers = hkl_family,
 
 
 
-view(atoms)
+#view(atoms)
 # surround it with water
 wet_rutile = surround_with_molecules(atoms, 
                                      fluid_molecule = 'H2O',

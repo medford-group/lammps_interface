@@ -82,7 +82,8 @@ def make_box_of_molecules(molecules, num_molecules, box,
         os.system('rm pk* *.pdb')
     return atoms
 
-def write_lammps_inputs_moltemplate(atoms, force_field, num_molecules):
+def write_lammps_inputs_moltemplate(atoms, force_field, num_molecules,
+                                    clean_folder = True):
     """
     A function to wrap the moltemplate package, to make it easier to call
     from python. This writes the input files for lammps under the following
@@ -118,7 +119,13 @@ def write_lammps_inputs_moltemplate(atoms, force_field, num_molecules):
     f.write('atm = new '+ force_field.upper() +
             ' [' + str(num_molecules) + ']')
     f.close()
-    os.system('moltemplate.sh -pdb mt.pdb -atomstyle full mt.lt &> mt.log')
+    import subprocess
+    f = open('mt.log','w')
+    p = subprocess.call('moltemplate.sh -pdb mt.pdb -atomstyle full mt.lt',
+                        shell = True, stdout = f, stderr = f)
+    if clean_folder:
+        os.system('rm -r output_ttree')
+    #os.system('moltemplate.sh -pdb mt.pdb -atomstyle full mt.lt &> mt.log')
 
 def write_lammps_data(atoms, filename = 'lmp.data', 
                       atoms_style = 'full', bonding = False):
@@ -459,7 +466,7 @@ def surround_with_molecules(atoms, particle_spacing = 8,
         volume = np.product(d)
     volume *= shape_factor
 
-    number_of_molecules = int(np.floor((atoms.get_volume() - (d) ** 3) * 0.0333679)) # approximate density of water
+    number_of_molecules = int(np.floor((atoms.get_volume() - volume) * 0.0333679)) # approximate density of water
 
     # this next part is such a mess, I'm so sorry
     # all this is doing is trying to make the particle more centered in the unit cell
