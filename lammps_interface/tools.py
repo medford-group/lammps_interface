@@ -884,15 +884,15 @@ def make_params_file(elements, etas, rs_s, n_g4_eta = 4, cutoff = 6.5):
 
     
     """
-    for file in files:
-        with open('params_{}'.format(file),'w') as f:
+    for element in elements:
+        with open('params_{}'.format(element),'w') as f:
             # G2
-            for species in range(1, len(files) + 1):
+            for species in range(1, len(element) + 1):
                 for eta, Rs in zip(etas, rs_s):
                     f.write('2 {} 0 {} {} {} 0.0\n'.format(species, cutoff,
                                                            np.round(eta, 6), Rs))
             # G4 
-            for i in range(1,len(files)+1):
+            for i in range(1,len(elements)+1):
                 n = i
                 while True:
                     for eta in np.logspace(-5, -1, num = n_g4_eta):
@@ -902,7 +902,7 @@ def make_params_file(elements, etas, rs_s, n_g4_eta = 4, cutoff = 6.5):
                                                                          np.round(eta, 6),
                                                                          zeta, lamda))
                     n += 1
-                    if n > len(files):
+                    if n > len(elements):
                         break
 
 def extract_rdf(filename, plot = False):

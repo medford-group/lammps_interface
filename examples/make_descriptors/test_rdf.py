@@ -7,7 +7,9 @@ elements = ['H','O']
 
 atoms = read('traj.traj', index = ':')
 
-etas, rs_s = make_rdf_based_descriptors(atoms, plot = True)
+etas, rs_s = make_rdf_based_descriptors(atoms, 
+                                        #plot = True # uncomment to plot descriptors
+                                        )
 
 etas = np.append(np.linspace(0.0001, 4, 10), np.logspace(-4,1,10))
 rs_s = [0] * 20

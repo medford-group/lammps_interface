@@ -1,4 +1,7 @@
 # Medford Group LAMMPS Interface Tools
+
+[![Build Status](https://travis-ci.org/medford-group/lammps_interface.svg?branch=master)](https://travis-ci.org/medford-group/lammps_interface)
+
 This is a collection of python tools used to interface with [LAMMPS](https://lammps.sandia.gov/). The interface is Linux only for the moment, if you're interested in Widnows support, open an issue and I can have a look at it. This package relies on `packmol`, please ensure that the [packmol](http://m3g.iqm.unicamp.br/packmol/home.shtml) executable is in your PATH somewhere. 
 
 This package utilizes the Atomistic Simulation Environment ([ASE](https://wiki.fysik.dtu.dk/ase/index.html)) fairly extensively, but does not use the calculator system within it. This enables the package to be very modular.
