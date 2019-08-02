@@ -19,5 +19,3 @@ script:
   - python3 ./examples/water_box/build.py
   - cd ./examples/make_descriptors/
   - python3 ./test_rdf.py
-  - cd ../read_rdf
-  - python3 ./read_rdf.py

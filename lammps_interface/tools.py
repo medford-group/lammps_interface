@@ -8,6 +8,7 @@ import importlib
 import numpy as np
 import os
 from ase import io
+from ase.geometry.analysis import Analysis
 from pymatgen.io.ase import AseAtomsAdaptor as adaptor
 from ase.spacegroup import crystal
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
@@ -79,6 +80,33 @@ def make_box_of_molecules(molecules, num_molecules, box,
     atoms.cell = box
     if clean_folder == True:
         os.system('rm pk* *.pdb')
+    return atoms
+
+def equilibrate_tip3p(atoms):
+    """
+    THIS FUCNTION DOES NOT WORK YET
+    takes a box of water and equilibrates it using TIP3P. Bonds
+    are infered. Much of this is taken from the ASE tutorial on
+    equilibrating TIPnP boxes:
+    https://wiki.fysik.dtu.dk/ase/tutorials/tipnp_equil/tipnp_equil.html
+
+    """
+    from ase.constraints import FixBondLengths
+    from ase.md import Langevin
+    from ase.units import fs, kB
+    from ase.calculators.tip3p import TIP3P
+    analysis = Analysis(atoms)
+    bonds = analysis.get_bonds('H','O')
+    bonds = [a for a in bonds if len(a) == 2]
+
+    atoms.set_constraint(FixBondLengths(bonds))
+    atoms.set_calculator(TIP3P(rc = 6))
+    md = Langevin(atoms, 1 * fs, temperature=300 * kB,
+              friction=0.01)
+    from ase.io.trajectory import Trajectory
+    traj = Trajectory('test.traj', 'w', atoms)
+    md.attach(traj.write, interval=1)
+    md.run(4000)
     return atoms
 
 def write_lammps_inputs_moltemplate(atoms, force_field, num_molecules,
@@ -653,7 +681,6 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
     """
     from scipy.integrate import trapz
     from ase.ga.utilities import get_rdf
-    from ase.geometry.analysis import Analysis
 
     #if type(images) == list:
     #    atoms = images[index]
@@ -779,7 +806,6 @@ def gaussian_fit_descriptors(traj, n_gaussians = 5, cutoff = 6.5,
     from ase.ga.utilities import get_rdf
     from scipy.optimize import curve_fit
     from sklearn.neighbors import KernelDensity
-    from ase.geometry.analysis import Analysis
 
 
     n = n_gaussians
@@ -897,7 +923,7 @@ def make_params_file(elements, etas, rs_s, n_g4_eta = 4, cutoff = 6.5):
                 while True:
                     for eta in np.logspace(-5, -1, num = n_g4_eta):
                         for lamda in [1.0, -1.0]:
-                            for zeta in [1.0, 4.0, 16.0]:
+                            for zeta in [1.0, 16.0]:
                                 f.write('4 {} {} {} {} {} {}\n'.format(i, n, cutoff,
                                                                          np.round(eta, 6),
                                                                          zeta, lamda))
@@ -997,7 +1023,6 @@ def kernel_density_radial_distribution_function(traj, bandwidth = 0.2,
     from ase.ga.utilities import get_rdf
     from scipy.optimize import curve_fit
     from sklearn.neighbors import KernelDensity
-    from ase.geometry.analysis import Analysis
 
     if type(traj) != list:
         traj = [traj]
