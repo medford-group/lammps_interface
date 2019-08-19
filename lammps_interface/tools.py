@@ -251,6 +251,39 @@ def fix_xyz_files(fil, data_file):
     f.write(xyz)
     f.close()
 
+def center_traj(traj, output_name = 'fixed.traj'):
+    """
+    center the atoms in a trajectory
+
+    Parameters:
+        traj (list):
+            a list of ase atoms objects that you'd like to center
+        output_name (str):
+            the name you'd like to give the output file
+
+    returns:
+        None
+    """
+
+    from ase.io import read, write
+    from ase.calculators.singlepoint import SinglePointCalculator as sp
+
+    new_traj = []
+    for image in traj:
+        energy = image.get_potential_energy()
+        forces = image.get_forces()
+        if sum(sum(image.cell)) == 0:  # Crudely check if it has a cell
+            image.set_cell([10,10,10])
+        image.center()
+        image.set_pbc([False] * 3)
+        image.set_calculator(sp(atoms = image,
+                                energy = energy,
+                                forces = forces))
+        new_traj.append(image)
+
+    write(ouput_name, new_traj)
+
+
 def parse_custom_dump(dump, datafile, label = 'atoms',
                       energyfile = None, write_traj = False):
     """
