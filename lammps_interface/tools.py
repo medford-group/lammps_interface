@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 Created on Wed Jan  9 12:31:50 2019
-
-@author: benjamin
+author: Ben Comer (Georgia Tech)
 """
 import importlib
 
 import numpy as np
 import os
 from ase import io
+from ase.geometry.analysis import Analysis
 from pymatgen.io.ase import AseAtomsAdaptor as adaptor
 from ase.spacegroup import crystal
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
@@ -80,6 +80,33 @@ def make_box_of_molecules(molecules, num_molecules, box,
     atoms.cell = box
     if clean_folder == True:
         os.system('rm pk* *.pdb')
+    return atoms
+
+def equilibrate_tip3p(atoms):
+    """
+    THIS FUCNTION DOES NOT WORK YET
+    takes a box of water and equilibrates it using TIP3P. Bonds
+    are infered. Much of this is taken from the ASE tutorial on
+    equilibrating TIPnP boxes:
+    https://wiki.fysik.dtu.dk/ase/tutorials/tipnp_equil/tipnp_equil.html
+
+    """
+    from ase.constraints import FixBondLengths
+    from ase.md import Langevin
+    from ase.units import fs, kB
+    from ase.calculators.tip3p import TIP3P
+    analysis = Analysis(atoms)
+    bonds = analysis.get_bonds('H','O')
+    bonds = [a for a in bonds if len(a) == 2]
+
+    atoms.set_constraint(FixBondLengths(bonds))
+    atoms.set_calculator(TIP3P(rc = 6))
+    md = Langevin(atoms, 1 * fs, temperature=300 * kB,
+              friction=0.01)
+    from ase.io.trajectory import Trajectory
+    traj = Trajectory('test.traj', 'w', atoms)
+    md.attach(traj.write, interval=1)
+    md.run(4000)
     return atoms
 
 def write_lammps_inputs_moltemplate(atoms, force_field, num_molecules,
@@ -204,7 +231,7 @@ def write_lammps_data(atoms, filename = 'lmp.data',
 def fix_xyz_files(fil, data_file):
     """
     replaces the atom numbers with the actual atom names in the xyz file
-    LAMMPS dumps out.
+    LAMMPS dumps out. This is needed to translate back from lammps to ase
 
     inputs:
         fil (str):
@@ -223,6 +250,39 @@ def fix_xyz_files(fil, data_file):
     f = open(fil,'w')
     f.write(xyz)
     f.close()
+
+def center_traj(traj, output_name = 'fixed.traj'):
+    """
+    center the atoms in a trajectory
+
+    Parameters:
+        traj (list):
+            a list of ase atoms objects that you'd like to center
+        output_name (str):
+            the name you'd like to give the output file
+
+    returns:
+        None
+    """
+
+    from ase.io import read, write
+    from ase.calculators.singlepoint import SinglePointCalculator as sp
+
+    new_traj = []
+    for image in traj:
+        energy = image.get_potential_energy()
+        forces = image.get_forces()
+        if sum(sum(image.cell)) == 0:  # Crudely check if it has a cell
+            image.set_cell([10,10,10])
+        image.center()
+        image.set_pbc([False] * 3)
+        image.set_calculator(sp(atoms = image,
+                                energy = energy,
+                                forces = forces))
+        new_traj.append(image)
+
+    write(ouput_name, new_traj)
+
 
 def parse_custom_dump(dump, datafile, label = 'atoms',
                       energyfile = None, write_traj = False):
@@ -245,8 +305,10 @@ def parse_custom_dump(dump, datafile, label = 'atoms',
     from ase.atoms import Atoms    
     f = open(dump,'r')
     text = f.read()
-    if 'type x y z fx fy fz' not in text:
-        raise Exception('the dump file is not in the correct format. Please make the dump "type x y z fx fy fz". Further functionality is planned to be added.')
+    #if 'type x y z fx fy fz' not in text:
+    #    raise Exception('the dump file is not in the correct format.'
+    #                    ' Please make the dump "type x y z fx fy fz".'
+    #                    ' Further functionality is planned to be added.')
     if datafile is not None:
         element_key = elements_from_datafile(datafile)
     steps = text.split('ITEM: TIMESTEP')[1:]
@@ -353,7 +415,16 @@ def elements_from_datafile(data_file):
 def strip_bonding_information(filename):
     """
     function to remove the bonding information from a lammps datafile
-    to be used as a reaxff input
+    to be used as a reaxff input. This is useful if you've generated
+    a lammps input file with moltemplate and need to remove the bonding
+    information.
+
+    Parameters:
+        filename (str):
+            The name of the file
+
+    returns
+        None
     """
 
     f = open(filename,'r')
@@ -612,7 +683,7 @@ def put_molecules_on_slab(atoms, offset = 1.5,
 
 
 def make_rdf_based_descriptors(images, n_descriptors = 20,
-                               index = 0, cutoff = 6.5, 
+                               cutoff = 6.5, 
                                fall_off_percent = 0.01,
                                descriptor_type = 'simplenn',
                                nbins = 200,
@@ -620,15 +691,35 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
     """
     generates reasonable values for eta and rs for a given image in a trajectory
     based on the radial distribution function.
+
+    Parameters:
+        images (list):
+            a list of ASE atoms objects to be used in the radial
+            distribution function calculation
+        n_descriptors (int):
+            the number of g2 descriptors you want to use
+        fall_off_percent (float):
+            the value of desriptor_n/descriptor_n+1 at the center of
+            descriptor_n+1. Higher values are more smeared gaussians
+            lower values are tighter gaussians
+        descriptor_type (str):
+            the program into which you will be putting these eta
+            values. simplenn and amp have different conventions for
+            what eta is.
+        nbins (int):
+            how many bins you want the radial distribution function
+            to be calculated with
+        plot (bool):
+            If True, the descriptors will be plotted over top of the
+            radial distribution function
     """
     from scipy.integrate import trapz
     from ase.ga.utilities import get_rdf
-    from ase.geometry.analysis import Analysis
 
-    if type(images) == list:
-        atoms = images[index]
-    else:
-        atoms = images
+    #if type(images) == list:
+    #    atoms = images[index]
+    #else:
+    #    atoms = images
 
     analysis = Analysis(images)
     rdf = analysis.get_rdf(rmax = cutoff, nbins = nbins,
@@ -687,7 +778,7 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
         import matplotlib.pyplot as plt
         plt.plot(distances, rdf)
         for rs, eta in zip(rs_s, etas):
-            x = np.linspace(0,cutoff,1000)
+            x = np.linspace(0, cutoff, 1000)
             y = [np.exp(-1 * eta * (a - rs) ** 2) for a in x]
             plt.plot(x,y)
         plt.show()
@@ -696,6 +787,8 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
 
 def gaussian_basis(x, a, xk, sigma):
     """
+    helper function for gaussian_fit_descriptors
+
     a: the aplitude
     xk: the x offset
     sigma: the standard deviation
@@ -703,6 +796,10 @@ def gaussian_basis(x, a, xk, sigma):
     return a * np.exp( -1 * ((x - xk) ** 2 / (2 * sigma ** 2)))
 
 def n_sized_gaussian(x, *a):
+    """
+    helper function for gaussian_fit_descriptors
+    """
+
     n = int(len(a) / 3)
     a = np.array(a)
     a = np.reshape(a, (n, 3))
@@ -712,15 +809,37 @@ def n_sized_gaussian(x, *a):
     return s
 
 
-def gaussian_fit_descriptors(traj, n_gaussians = 5, cutoff = 6.5, nbins = 10, plot = False):
+def gaussian_fit_descriptors(traj, n_gaussians = 5, cutoff = 6.5, 
+                             nbins = 10, plot = False):
     """
-    approximates the RDF using a sum of gaussian functions then uses the centers
-    and standard deviations of those gaussians to generate descriptors.
+    approximates the RDF using a sum of gaussian functions then 
+    uses the centers and standard deviations of those gaussians to
+    generate descriptors. This is still under development
+
+    Parameters:
+        traj (list):
+            a list of ASE atoms objects with which you'd like to 
+            calculate the radial distribution function
+        n_gaussians (int):
+            the number of gaussians you'd like to fit the radial
+            distribution function to
+        cutoff (float):
+            the distance in angstroms at which you'd like to cut 
+            off the descriptors 
+        nbins (int):
+            the number of bins you'd like to calculate the radial
+            distribution function with.
+        plot (bool):
+            If set to True, a plot will be displayed showing the
+            radial distribution function with the gaussians 
+            overlayed.
+
+    returns:
+        None
     """
     from ase.ga.utilities import get_rdf
     from scipy.optimize import curve_fit
     from sklearn.neighbors import KernelDensity
-    from ase.geometry.analysis import Analysis
 
 
     n = n_gaussians
@@ -797,29 +916,53 @@ def gaussian_fit_descriptors(traj, n_gaussians = 5, cutoff = 6.5, nbins = 10, pl
         plt.show()
 
 
-def make_params_file(files, etas, rs_s, dist_dict, n_g4_eta = 4, cutoff = 6.5):
+def make_params_file(elements, etas, rs_s, n_g4_eta = 4, cutoff = 6.5):
     """
-    make a params file for simple_NN
+    makes a params file for simple_NN. This is the file containing
+    the descriptors. This function makes g2 descriptos for the eta
+    and rs values that are input, and g4 descriptors that are log
+    spaced between 10 ** -5 and 10 ** -1. The number of these
+    that are made is controlled by the `n_g4_eta` variable
+
+    Parameters:
+        elements (list):
+            a list of elements for which you'd like to make params
+            files for
+        etas (list):
+            the eta values you'd like to use for the descriptors
+        rs_s (list):
+            a list corresponding to `etas` that contains the rs
+            values for each descriptor
+        n_g4_eta (int):
+            the number of g4 descriptors you'd like to use
+        cutoff (float):
+            the distance in angstroms at which you'd like to cut 
+            off the descriptors
+    
+    returns:
+        None
+
+    
     """
-    for file in files:
-        with open('params_{}'.format(file),'w') as f:
+    for element in elements:
+        with open('params_{}'.format(element),'w') as f:
             # G2
-            for species in range(1, len(files) + 1):
+            for species in range(1, len(element) + 1):
                 for eta, Rs in zip(etas, rs_s):
                     f.write('2 {} 0 {} {} {} 0.0\n'.format(species, cutoff,
                                                            np.round(eta, 6), Rs))
             # G4 
-            for i in range(1,len(files)+1):
+            for i in range(1,len(elements)+1):
                 n = i
                 while True:
                     for eta in np.logspace(-5, -1, num = n_g4_eta):
                         for lamda in [1.0, -1.0]:
-                            for zeta in [1.0, 4.0, 16.0]:
+                            for zeta in [1.0, 16.0]:
                                 f.write('4 {} {} {} {} {} {}\n'.format(i, n, cutoff,
                                                                          np.round(eta, 6),
                                                                          zeta, lamda))
                     n += 1
-                    if n > len(files):
+                    if n > len(elements):
                         break
 
 def extract_rdf(filename, plot = False):
@@ -889,11 +1032,31 @@ def kernel_density_radial_distribution_function(traj, bandwidth = 0.2,
                                                 plot = False):
     """
     approximates the RDF using kernel density estimation
+
+    Parameters:
+        traj (list):
+            a list of ASE atoms objects with which you'd like to 
+            calculate the radial distribution function
+        bandwidth (float):
+            the bandwidth to be used for the kernel density
+            appoximation
+        cutoff (float):
+            the distance in angstroms at which you'd like to cut 
+            off the descriptors
+        nbins (int):
+            the number of bins you'd like to calculate your radial
+            distribution function with
+        plot (bool):
+            if set to True, a plot will be returned of the 
+            radial distribution function and the kernel density
+            approximation
+
+    returns:
+        None
     """
     from ase.ga.utilities import get_rdf
     from scipy.optimize import curve_fit
     from sklearn.neighbors import KernelDensity
-    from ase.geometry.analysis import Analysis
 
     if type(traj) != list:
         traj = [traj]
