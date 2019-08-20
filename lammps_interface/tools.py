@@ -378,6 +378,7 @@ def make_standard_input(calculation_type = 'reaxff',
                         steps = 20000,
                         temp = 300):
     """
+    TODO: make sure that the atoms are placed in order in the .in file
     function to just generate a generic input file to run a basic
     simulation. No frills, it just works.
     """
