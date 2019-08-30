@@ -79,12 +79,27 @@ def make_box_of_molecules(molecules, num_molecules, box,
             f.write('   radius ' + str(radius) + '\n')
         f.write('end structure' + '\n\n')
     f.close()
-    os.system('packmol < pk.inp > pk.log')
+    #os.sysitem('packmol < pk.inp > pk.log')
+    run_packmol()
     atoms = io.read(outputfile)
     atoms.cell = box
     if clean_folder == True:
         os.system('rm pk* *.pdb')
     return atoms
+
+
+def run_packmol():
+    """
+    executes packmol and makes sure to let the user know to cite
+    packmol (giving credit is important!)
+    """
+    print('you are using a function that utilizes packmol, please'
+          ' ensure you cite packmol in your paper.\n L. Martínez, '
+          'R. Andrade, E. G. Birgin, J. M. Martínez. Packmol: A '
+          'package for building initial configurations for '
+          'molecular dynamics simulations. Journal of Computational '
+          'Chemistry, 30(13):2157-2164, 2009.')
+    os.system('packmol < pk.inp > pk.log')
 
 def equilibrate_tip3p(atoms):
     """
@@ -294,7 +309,8 @@ def parse_custom_dump(dump, datafile, label = 'atoms',
     This function parses the output of a LAMMPS custom dump file. Currently
     this function assumes you've put in this for the custom dump: 
     "element x y z fx fy fz". There are plans to expand this to be more general
-    if the need arises. This assumes units are set to real.
+    if the need arises. This assumes units are set to real. Only works with
+    orthogonal unit cells currently
 
     inputs:
         dump (str):
@@ -544,9 +560,9 @@ def surround_with_molecules(atoms, particle_spacing = 8,
 
     number_of_molecules = int(np.floor((atoms.get_volume() - volume) * 0.0333679)) # approximate density of water
 
+    atoms = make_box_of_molecules([fluid_molecule,atoms], [number_of_molecules,1], atoms.cell)
     # this next part is such a mess, I'm so sorry
     # all this is doing is trying to make the particle more centered in the unit cell
-    atoms = make_box_of_molecules([fluid_molecule,atoms], [number_of_molecules,1], atoms.cell)
     metal_s = [a for a in atoms if a.symbol == metal]
     metal_object = Atoms(cell = atoms.cell)
     for atom in metal_s:
@@ -686,12 +702,12 @@ def put_molecules_on_slab(atoms, offset = 1.5,
     return slab
 
 
-def make_rdf_based_descriptors(images, n_descriptors = 20,
-                               cutoff = 6.5, 
-                               fall_off_percent = 0.01,
-                               descriptor_type = 'simplenn',
-                               nbins = 200,
-                               plot = False):
+def make_rdf_based_descriptors(images, n_descriptors=20,
+                               cutoff=6.5, 
+                               fall_off_percent=0.2,
+                               descriptor_type='simplenn',
+                               nbins=200,
+                               plot=False):
     """
     generates reasonable values for eta and rs for a given image in a trajectory
     based on the radial distribution function.
@@ -709,7 +725,7 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
         descriptor_type (str):
             the program into which you will be putting these eta
             values. simplenn and amp have different conventions for
-            what eta is.
+            what eta is. possible values are `amp` and `simplenn`
         nbins (int):
             how many bins you want the radial distribution function
             to be calculated with
@@ -790,6 +806,9 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
         plt.title('Radial Distribution Function and Derived Descriptors')
         plt.savefig('rdf.png')
         plt.show()
+
+    if descriptor_type.lower() == 'amp':
+        etas = [a / cutoff for a in etas]
     return etas, rs_s
 
 
@@ -924,7 +943,8 @@ def gaussian_fit_descriptors(traj, n_gaussians = 5, cutoff = 6.5,
         plt.show()
 
 
-def make_params_file(elements, etas, rs_s, n_g4_eta = 4, cutoff = 6.5):
+def make_params_file(elements, etas, rs_s, g4_eta = 4, cutoff = 6.5,
+                     g4_zeta=[1.0, 4.0]):
     """
     makes a params file for simple_NN. This is the file containing
     the descriptors. This function makes g2 descriptos for the eta
@@ -941,8 +961,10 @@ def make_params_file(elements, etas, rs_s, n_g4_eta = 4, cutoff = 6.5):
         rs_s (list):
             a list corresponding to `etas` that contains the rs
             values for each descriptor
-        n_g4_eta (int):
-            the number of g4 descriptors you'd like to use
+        g4_eta (int or list):
+            the number of g4 descriptors you'd like to use. if a
+            list is passed in the values of the list will be used
+            as eta values
         cutoff (float):
             the distance in angstroms at which you'd like to cut 
             off the descriptors
@@ -952,20 +974,22 @@ def make_params_file(elements, etas, rs_s, n_g4_eta = 4, cutoff = 6.5):
 
     
     """
+    if type(g4_eta) == int:
+        g4_eta = np.logspace(-5, -1, num = g4_eta)
     for element in elements:
         with open('params_{}'.format(element),'w') as f:
             # G2
-            for species in range(1, len(element) + 1):
+            for species in range(1, len(element) + 2):
                 for eta, Rs in zip(etas, rs_s):
                     f.write('2 {} 0 {} {} {} 0.0\n'.format(species, cutoff,
                                                            np.round(eta, 6), Rs))
             # G4 
-            for i in range(1,len(elements)+1):
+            for i in range(1, len(elements) + 1):
                 n = i
                 while True:
-                    for eta in np.logspace(-5, -1, num = n_g4_eta):
+                    for eta in g4_eta:
                         for lamda in [1.0, -1.0]:
-                            for zeta in [1.0, 16.0]:
+                            for zeta in g4_zeta:
                                 f.write('4 {} {} {} {} {} {}\n'.format(i, n, cutoff,
                                                                          np.round(eta, 6),
                                                                          zeta, lamda))
@@ -1144,7 +1168,7 @@ def rereference_traj(traj):
     from ase.calculators.singlepoint import SinglePointCalculator as sp
     from ase.io.trajectory import Trajectory
     first_eng = traj[0].get_potential_energy()
-    writer = Trajectory('out.traj', mode = 'w')
+    #writer = Trajectory('out.traj', mode = 'w')
 
     for image in traj:
         frc = image.get_forces()
@@ -1152,18 +1176,16 @@ def rereference_traj(traj):
         image.set_calculator(sp(image, energy = eng - first_eng,
                             forces = frc))
     return traj
-        #writer.write(image)
 
 def restart_simple_nn(num):
-    num = 98001
-
-    os.system('cp SAVER_epoch{}.meta SAVER.meta'.format(num))
-    os.system('cp SAVER_epoch{}.data-00000-of-00001 SAVER.data-00000-of-00001'.format(num))
-    os.system('cp SAVER_epoch{}.index SAVER.index'.format(num))
+    e1 = os.system('cp SAVER_epoch{}.meta SAVER.meta'.format(num))
+    e2 = os.system('cp SAVER_epoch{}.data-00000-of-00001 SAVER.data-00000-of-00001'.format(num))
+    e3 = os.system('cp SAVER_epoch{}.index SAVER.index'.format(num))
+    if e1 or e2 or e3:
+        raise RuntimeError('could not restart simple_nn')
 
 def parse_simple_nn_log(directory='.', plot=False):
     import matplotlib.pyplot as plt
-
     with open('LOG', 'r') as f:
         txt = f.read()
 
@@ -1184,12 +1206,30 @@ def parse_simple_nn_log(directory='.', plot=False):
 
     x = range(len(train_engs))
 
+    # generate a moving average
+    avg_test_engs = []
+    for i, eng in enumerate(test_engs):
+        if i < 19:
+            avg_test_engs.append(np.mean(test_engs[:i+1]))
+        else:
+            avg_test_engs.append(np.mean(test_engs[i-19:i+1]))
+
     if plot:
-        fig = plt.figure()
-        plt.plot(x, test_frcs)
-        plt.title('Learning Curve')
-        plt.ylabel('Force RMSE (eV/A)')
-        plt.xlabel('Checkpoint')
+        plt.rcParams["figure.figsize"] = (15,5)
+        fig, _axs = plt.subplots(nrows = 1, ncols = 2)
+        axs = _axs.flatten()
+        axs[0].plot(x, test_frcs)
+        axs[0].set_title('Learning Curve')
+        axs[0].set_ylabel('Test Set Force RMSE (eV/A)')
+        axs[0].set_xlabel('Checkpoint')
+        axs[0].set_ylim([0,1])
+        axs[1].plot(x, test_engs, label='learning rate')
+        axs[1].plot(x, avg_test_engs,label='moving average')
+        axs[1].set_title('Learning Curve')
+        axs[1].set_ylabel('Test Set Energy RMSE (eV)')
+        axs[1].set_xlabel('Checkpoint')
+        axs[1].set_ylim([0,0.1])
+        axs[1].legend()
         plt.savefig('learning.png')
         plt.show()
 
@@ -1199,7 +1239,48 @@ def parse_simple_nn_log(directory='.', plot=False):
     Results = namedtuple('Results', 'train_engs test_engs train_frcs test_frcs')
     return Results(train_engs, test_engs, train_frcs, test_frcs)
 
+def change_yaml_line(line_text, filename):
+    """
+    helper function to modify a single line of a .yaml
+    file
 
+    Parameters:
+        line_text:
+            the text you'd like the line to be, this is
+            used to find the relevant line in the .yaml
+            file
+        filename:
+            the name of the file you'd like to modify
+    """
+    with open(filename, 'r') as f:
+        lines = f.readlines()
+
+    new_lines = []
+    line_identifier = line_text.split(':')[0].strip()
+    for line in lines:
+        if line_identifier in line:
+            new_lines.append(line_text + '\n')
+        else:
+            new_lines.append(line)
+    with open(filename, 'w') as f:
+        f.writelines(new_lines)
+
+def change_num_epoch_simple_nn(num_epoch, filename='input.yaml'):
+    """
+    a function to change the number of epochs being run in a
+    simple_nn input file.
+    """
+    change_yaml_line('  total_epoch: {}'.format(num_epoch), filename)
+
+def toggle_continue_simple_nn(cont, filename='input.yaml'):
+    """
+    allows you to toggle if simple_nn re-imports the last
+    model
+    """
+    if cont == 'yes':
+        change_yaml_line('  continue: true', filename)
+    elif cont == 'no':
+        change_yaml_line('  continue: false', filename)
 
 def run_schnetpack(db_file):
         import os
