@@ -1204,21 +1204,25 @@ def parse_simple_nn_log(directory='.', plot=False):
         train_frcs.append(train_frc)
         test_frcs.append(test_frc)
 
-    x = range(len(train_engs))
+    x = range(1, len(train_engs) + 1)
 
     # generate a moving average
     avg_test_engs = []
+    avg_test_frcs = []
     for i, eng in enumerate(test_engs):
         if i < 19:
             avg_test_engs.append(np.mean(test_engs[:i+1]))
+            avg_test_frcs.append(np.mean(test_frcs[:i+1]))
         else:
             avg_test_engs.append(np.mean(test_engs[i-19:i+1]))
+            avg_test_frcs.append(np.mean(test_frcs[i-19:i+1]))
 
     if plot:
         plt.rcParams["figure.figsize"] = (15,5)
         fig, _axs = plt.subplots(nrows = 1, ncols = 2)
         axs = _axs.flatten()
-        axs[0].plot(x, test_frcs)
+        axs[0].plot(x, test_frcs, label='learning rate')
+        axs[0].plot(x, avg_test_frcs, label='moving average')
         axs[0].set_title('Learning Curve')
         axs[0].set_ylabel('Test Set Force RMSE (eV/A)')
         axs[0].set_xlabel('Checkpoint')
@@ -1228,7 +1232,7 @@ def parse_simple_nn_log(directory='.', plot=False):
         axs[1].set_title('Learning Curve')
         axs[1].set_ylabel('Test Set Energy RMSE (eV)')
         axs[1].set_xlabel('Checkpoint')
-        axs[1].set_ylim([0,0.1])
+        #axs[1].set_ylim([0,0.1])
         axs[1].legend()
         plt.savefig('learning.png')
         plt.show()
@@ -1281,6 +1285,21 @@ def toggle_continue_simple_nn(cont, filename='input.yaml'):
         change_yaml_line('  continue: true', filename)
     elif cont == 'no':
         change_yaml_line('  continue: false', filename)
+
+def atomic_parity_plot(traj1, traj2):
+    """
+    makes a parity plot between the energies of two trajectories
+    which are assumed to be the same elementwise
+    """
+    from matplotlib import pyplot as plt
+    E1 = []
+    E2 = []
+    for i1, i2, in zip(traj1, traj2):
+        E1.append(i1.get_potential_energy())
+        E2.append(i2.get_potential_energy())
+    plt.scatter(E1, E2)
+    plt.plot([min(E1 + E2)] * 2, [max(E1 + E2)] * 2)
+    plt.show()
 
 def run_schnetpack(db_file):
         import os
