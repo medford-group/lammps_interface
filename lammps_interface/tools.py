@@ -4,11 +4,15 @@ Created on Wed Jan  9 12:31:50 2019
 author: Ben Comer (Georgia Tech)
 """
 import importlib
+from collections import namedtuple
 
 import numpy as np
 import os
 from ase import io
-#from ase.geometry.analysis import Analysis
+import json
+from io import StringIO
+
+from ase.geometry.analysis import Analysis
 from pymatgen.io.ase import AseAtomsAdaptor as adaptor
 from ase.spacegroup import crystal
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
@@ -75,12 +79,27 @@ def make_box_of_molecules(molecules, num_molecules, box,
             f.write('   radius ' + str(radius) + '\n')
         f.write('end structure' + '\n\n')
     f.close()
-    os.system('packmol < pk.inp > pk.log')
+    #os.sysitem('packmol < pk.inp > pk.log')
+    run_packmol()
     atoms = io.read(outputfile)
     atoms.cell = box
     if clean_folder == True:
         os.system('rm pk* *.pdb')
     return atoms
+
+
+def run_packmol():
+    """
+    executes packmol and makes sure to let the user know to cite
+    packmol (giving credit is important!)
+    """
+    print('you are using a function that utilizes packmol, please'
+          ' ensure you cite packmol in your paper.\n L. Martínez, '
+          'R. Andrade, E. G. Birgin, J. M. Martínez. Packmol: A '
+          'package for building initial configurations for '
+          'molecular dynamics simulations. Journal of Computational '
+          'Chemistry, 30(13):2157-2164, 2009.')
+    os.system('packmol < pk.inp > pk.log')
 
 def equilibrate_tip3p(atoms):
     """
@@ -291,7 +310,8 @@ def parse_custom_dump(dump, datafile, label='atoms',
     This function parses the output of a LAMMPS custom dump file. Currently
     this function assumes you've put in this for the custom dump: 
     "element x y z fx fy fz". There are plans to expand this to be more general
-    if the need arises. This assumes units are set to real.
+    if the need arises. This assumes units are set to real. Only works with
+    orthogonal unit cells currently
 
     inputs:
         dump (str):
@@ -561,9 +581,9 @@ def surround_with_molecules(atoms, particle_spacing = 8,
 
     number_of_molecules = int(np.floor((atoms.get_volume() - volume) * 0.0333679)) # approximate density of water
 
+    atoms = make_box_of_molecules([fluid_molecule,atoms], [number_of_molecules,1], atoms.cell)
     # this next part is such a mess, I'm so sorry
     # all this is doing is trying to make the particle more centered in the unit cell
-    atoms = make_box_of_molecules([fluid_molecule,atoms], [number_of_molecules,1], atoms.cell)
     metal_s = [a for a in atoms if a.symbol == metal]
     metal_object = Atoms(cell = atoms.cell)
     for atom in metal_s:
@@ -703,12 +723,12 @@ def put_molecules_on_slab(atoms, offset = 1.5,
     return slab
 
 
-def make_rdf_based_descriptors(images, n_descriptors = 20,
-                               cutoff = 6.5, 
-                               fall_off_percent = 0.01,
-                               descriptor_type = 'simplenn',
-                               nbins = 200,
-                               plot = False):
+def make_rdf_based_descriptors(images, n_descriptors=20,
+                               cutoff=6.5, 
+                               fall_off_percent=0.2,
+                               descriptor_type='simplenn',
+                               nbins=200,
+                               plot=False):
     """
     generates reasonable values for eta and rs for a given image in a trajectory
     based on the radial distribution function.
@@ -726,7 +746,7 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
         descriptor_type (str):
             the program into which you will be putting these eta
             values. simplenn and amp have different conventions for
-            what eta is.
+            what eta is. possible values are `amp` and `simplenn`
         nbins (int):
             how many bins you want the radial distribution function
             to be calculated with
@@ -781,7 +801,7 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
     etas = []
     rs_s = [0] * n_descriptors
     for distance in descriptor_distances:
-        etas.append(-1 * np.log(0.01) / distance ** 2)
+        etas.append(-1 * np.log(fall_off_percent) / distance ** 2)
     for i, distance in enumerate(descriptor_distances):
         if i == 0:
             localization_distance = abs(descriptor_distances[i+1] - distance)
@@ -797,12 +817,19 @@ def make_rdf_based_descriptors(images, n_descriptors = 20,
         rs_s.append(distance)
     if plot == True:
         import matplotlib.pyplot as plt
-        plt.plot(distances, rdf)
+        plt.plot(distances, np.array(rdf))
         for rs, eta in zip(rs_s, etas):
             x = np.linspace(0, cutoff, 1000)
             y = [np.exp(-1 * eta * (a - rs) ** 2) for a in x]
-            plt.plot(x,y)
+            plt.plot(x,np.array(y) * max(rdf), alpha = 0.4)
+        plt.xlabel('Distance (Angstrom)')
+        plt.ylabel('Total RDF')
+        plt.title('Radial Distribution Function and Derived Descriptors')
+        plt.savefig('rdf.png')
         plt.show()
+
+    if descriptor_type.lower() == 'amp':
+        etas = [a / cutoff for a in etas]
     return etas, rs_s
 
 
@@ -937,7 +964,8 @@ def gaussian_fit_descriptors(traj, n_gaussians = 5, cutoff = 6.5,
         plt.show()
 
 
-def make_params_file(elements, etas, rs_s, n_g4_eta = 4, cutoff = 6.5):
+def make_params_file(elements, etas, rs_s, g4_eta = 4, cutoff = 6.5,
+                     g4_zeta=[1.0, 4.0]):
     """
     makes a params file for simple_NN. This is the file containing
     the descriptors. This function makes g2 descriptos for the eta
@@ -954,8 +982,10 @@ def make_params_file(elements, etas, rs_s, n_g4_eta = 4, cutoff = 6.5):
         rs_s (list):
             a list corresponding to `etas` that contains the rs
             values for each descriptor
-        n_g4_eta (int):
-            the number of g4 descriptors you'd like to use
+        g4_eta (int or list):
+            the number of g4 descriptors you'd like to use. if a
+            list is passed in the values of the list will be used
+            as eta values
         cutoff (float):
             the distance in angstroms at which you'd like to cut 
             off the descriptors
@@ -965,20 +995,22 @@ def make_params_file(elements, etas, rs_s, n_g4_eta = 4, cutoff = 6.5):
 
     
     """
+    if type(g4_eta) == int:
+        g4_eta = np.logspace(-5, -1, num = g4_eta)
     for element in elements:
         with open('params_{}'.format(element),'w') as f:
             # G2
-            for species in range(1, len(element) + 1):
+            for species in range(1, len(element) + 2):
                 for eta, Rs in zip(etas, rs_s):
                     f.write('2 {} 0 {} {} {} 0.0\n'.format(species, cutoff,
                                                            np.round(eta, 6), Rs))
             # G4 
-            for i in range(1,len(elements)+1):
+            for i in range(1, len(elements) + 1):
                 n = i
                 while True:
-                    for eta in np.logspace(-5, -1, num = n_g4_eta):
+                    for eta in g4_eta:
                         for lamda in [1.0, -1.0]:
-                            for zeta in [1.0, 16.0]:
+                            for zeta in g4_zeta:
                                 f.write('4 {} {} {} {} {} {}\n'.format(i, n, cutoff,
                                                                          np.round(eta, 6),
                                                                          zeta, lamda))
@@ -1001,7 +1033,6 @@ def extract_rdf(filename, plot = False):
         None
     """
     import pandas as pd
-    from io import StringIO
     with open(filename, 'r') as f:
         text = f.read()
     rdfs = text.split('# TimeStep Number-of-rows\n')[1:]
@@ -1121,3 +1152,327 @@ def kernel_density_radial_distribution_function(traj, bandwidth = 0.2,
         plt.plot(distances, total_rdf)
         plt.plot(np.linspace(0.7,cutoff,1000), dens)
         plt.show()
+
+def atoms_to_json(atoms):
+    """
+    convert an atoms object to a json form
+    """
+    with StringIO() as f:
+        io.write(f, atoms, format = 'json')
+        json_str_atoms = f.getvalue()
+
+    with StringIO(json_str_atoms) as g:
+        json_atoms = json.load(g)
+    json_atoms = json_atoms['1']
+    superfluous_entries = ['ctime', 'mtime', 'unique_id', 'user']
+    for entry in superfluous_entries:
+        json_atoms.pop(entry, None)
+    return json_atoms
+
+def json_to_atoms(json_atoms):
+    """
+    convert back from json to an atoms object
+    """
+    json_atoms = {'1': json_atoms,
+                  'ids': [1],
+                  'nextid': 2}
+    json_str_atoms = json.dumps(json_atoms)
+    with StringIO(json_str_atoms) as f:
+        atoms = io.read(f, format='json')
+    return atoms
+
+def rereference_traj(traj):
+    """
+    subtracts off the first energy in a trajectory from all the other
+    energies and returns the result
+    """
+    from ase.calculators.singlepoint import SinglePointCalculator as sp
+    from ase.io.trajectory import Trajectory
+    first_eng = traj[0].get_potential_energy()
+    #writer = Trajectory('out.traj', mode = 'w')
+
+    for image in traj:
+        frc = image.get_forces()
+        eng = image.get_potential_energy()
+        image.set_calculator(sp(image, energy = eng - first_eng,
+                            forces = frc))
+    return traj
+
+def restart_simple_nn(num):
+    e1 = os.system('cp SAVER_epoch{}.meta SAVER.meta'.format(num))
+    e2 = os.system('cp SAVER_epoch{}.data-00000-of-00001 SAVER.data-00000-of-00001'.format(num))
+    e3 = os.system('cp SAVER_epoch{}.index SAVER.index'.format(num))
+    if e1 or e2 or e3:
+        raise RuntimeError('could not restart simple_nn')
+
+def parse_simple_nn_log(directory='.', plot=False):
+    import matplotlib.pyplot as plt
+    with open('LOG', 'r') as f:
+        txt = f.read()
+
+    epochs = txt.split('epoch')[1:]
+    train_engs, test_engs, train_frcs, test_frcs = [], [], [], []
+
+    for epoch in epochs:
+        eng = epoch.split('E RMSE(T V) = ')[1]
+        eng, frc = eng.split('F RMSE(T V) =')
+        frc = frc.split(' learning_rate')[0]
+
+        train_eng, test_eng = tuple([float(a) for a in eng.split()])
+        train_frc, test_frc = tuple([float(a) for a in frc.split()])
+        train_engs.append(train_eng)
+        test_engs.append(test_eng)
+        train_frcs.append(train_frc)
+        test_frcs.append(test_frc)
+
+    x = range(1, len(train_engs) + 1)
+
+    # generate a moving average
+    avg_test_engs = []
+    avg_test_frcs = []
+    for i, eng in enumerate(test_engs):
+        if i < 19:
+            avg_test_engs.append(np.mean(test_engs[:i+1]))
+            avg_test_frcs.append(np.mean(test_frcs[:i+1]))
+        else:
+            avg_test_engs.append(np.mean(test_engs[i-19:i+1]))
+            avg_test_frcs.append(np.mean(test_frcs[i-19:i+1]))
+
+    if plot:
+        plt.rcParams["figure.figsize"] = (15,5)
+        fig, _axs = plt.subplots(nrows = 1, ncols = 2)
+        axs = _axs.flatten()
+        axs[0].plot(x, test_frcs, label='learning rate')
+        axs[0].plot(x, avg_test_frcs, label='moving average')
+        axs[0].set_title('Learning Curve')
+        axs[0].set_ylabel('Test Set Force RMSE (eV/A)')
+        axs[0].set_xlabel('Checkpoint')
+        axs[0].set_ylim([0,1])
+        axs[1].plot(x, test_engs, label='learning rate')
+        axs[1].plot(x, avg_test_engs,label='moving average')
+        axs[1].set_title('Learning Curve')
+        axs[1].set_ylabel('Test Set Energy RMSE (eV)')
+        axs[1].set_xlabel('Checkpoint')
+        #axs[1].set_ylim([0,0.1])
+        axs[1].legend()
+        plt.savefig('learning.png')
+        plt.show()
+
+        fig = plt.figure()
+        plt.plot(x, test_engs)
+        #plt.show()
+    Results = namedtuple('Results', 'train_engs test_engs train_frcs test_frcs')
+    return Results(train_engs, test_engs, train_frcs, test_frcs)
+
+def change_yaml_line(line_text, filename):
+    """
+    helper function to modify a single line of a .yaml
+    file
+
+    Parameters:
+        line_text:
+            the text you'd like the line to be, this is
+            used to find the relevant line in the .yaml
+            file
+        filename:
+            the name of the file you'd like to modify
+    """
+    with open(filename, 'r') as f:
+        lines = f.readlines()
+
+    new_lines = []
+    line_identifier = line_text.split(':')[0].strip()
+    for line in lines:
+        if line_identifier in line:
+            new_lines.append(line_text + '\n')
+        else:
+            new_lines.append(line)
+    with open(filename, 'w') as f:
+        f.writelines(new_lines)
+
+def change_num_epoch_simple_nn(num_epoch, filename='input.yaml'):
+    """
+    a function to change the number of epochs being run in a
+    simple_nn input file.
+    """
+    change_yaml_line('  total_epoch: {}'.format(num_epoch), filename)
+
+def toggle_continue_simple_nn(cont, filename='input.yaml'):
+    """
+    allows you to toggle if simple_nn re-imports the last
+    model
+    """
+    if cont == 'yes':
+        change_yaml_line('  continue: true', filename)
+    elif cont == 'no':
+        change_yaml_line('  continue: false', filename)
+
+def atomic_parity_plot(traj1, traj2):
+    """
+    makes a parity plot between the energies of two trajectories
+    which are assumed to be the same elementwise
+    """
+    from matplotlib import pyplot as plt
+    E1 = []
+    E2 = []
+    for i1, i2, in zip(traj1, traj2):
+        E1.append(i1.get_potential_energy())
+        E2.append(i2.get_potential_energy())
+    plt.scatter(E1, E2)
+    plt.plot([min(E1 + E2)] * 2, [max(E1 + E2)] * 2)
+    plt.show()
+
+def run_schnetpack(db_file):
+        import os
+        import torch.nn.functional as F
+
+        import logging
+        from torch.optim import Adam
+        import schnetpack as spk
+        from schnetpack.train import Trainer, CSVHook, ReduceLROnPlateauHook, TensorboardHook
+        from schnetpack.train.metrics import MeanAbsoluteError, RootMeanSquaredError
+        #from schnetpack.metrics import build_mse_loss
+        from schnetpack.train.metrics import MeanSquaredError
+        from schnetpack.data import AtomsData
+        import schnetpack.atomistic as atm
+        import schnetpack.representation as rep
+        import numpy as np
+
+        #mse_loss = MeanSquaredError()
+        mse_loss = spk.train.loss.build_mse_loss
+
+        logging.basicConfig(level=os.environ.get("LOGLEVEL", "INFO"))
+
+
+        # basic settings
+        model_name = db_file.split('.')[0]
+        model_dir = model_name + '_model'  # directory that will be created for storing model
+        if not os.path.isdir(model_name):
+            os.mkdir(model_dir)
+        #os.makedirs(model_dir)
+        properties = ["energy", "forces"]  # properties used for training
+
+        # data preparation
+        logging.info("get dataset")
+        dataset = AtomsData(db_file, 
+                            available_properties=properties,
+                            #required_properties=properties,
+                            collect_triples=True)
+
+        train, val, test = spk.train_test_split(
+            data=dataset,
+            num_train=400,
+            num_val=20,
+            split_file=os.path.join(model_dir, "split.npz"),
+        )
+        train_loader = spk.AtomsLoader(train, batch_size=32, shuffle=True)
+        val_loader = spk.AtomsLoader(val, batch_size=5)
+
+        # get statistics
+        #atomrefs = dataset.get_atomrefs(properties)
+
+        atomrefs={'energy':{'H':-4.578106,
+                  'O':2052.084023}}
+        energy_array = np.array([0,-6.879145831,0,0,0,0,0,0,-2055.665708] + [0] * 91)
+        energy_array = energy_array.reshape((100,1))
+        atomrefs={'energy':energy_array}
+        per_atom = dict(energy=True, forces=False)
+        means, stddevs = train_loader.get_statistics(
+            ['energy'], 
+            #atomrefs=atomrefs, 
+            single_atom_ref=atomrefs,
+            #per_atom=per_atom
+            divide_by_atoms = True,
+        )
+
+        # model build
+        logging.info("build model")
+        #representation = spk.SchNet(n_interactions=6)
+        #representation = spk.representation.SymmetryFunctions(elements={6})
+        """
+        output_modules = [
+            spk.Atomwise(
+                property="energy",
+                derivative="forces",
+                mean=means["energy"],
+                stddev=stddevs["energy"],
+                negative_dr=True,
+            )
+        ]
+        """
+        """
+        reps = rep.BehlerSFBlock(elements={13},
+                                 n_radial = 40,
+                                 n_angular = 40,
+                                 cutoff_radius = 8,
+                                 crossterms = False,
+                                 zetas = {1,4},
+                                 
+                                 )
+        """
+        reps = rep.SymmetryFunctions(
+                n_radial=40,
+                n_angular=40,
+                zetas={1,4},
+                cutoff=spk.nn.CosineCutoff,
+                cutoff_radius=4.0,
+                centered=False,
+                crossterms=False,
+                #elements=frozenset((1, 6, 7, 8, 9)),
+                sharez=True,
+                trainz=False,
+                initz="weighted",
+                len_embedding=5,
+                pairwise_elements=False,)
+
+        std_reps = rep.StandardizeSF(reps, train_loader)
+
+        output = spk.atomistic.output_modules.ElementalAtomwise(reps.n_symfuncs,
+                                                      n_layers=4,
+                                                      atomref=atomrefs['energy'],
+                                                      n_hidden=80,
+                                                      property = 'energy',
+                                                      derivative = 'forces',
+                                                      mean=means["energy"],
+                                                      stddev=stddevs["energy"],
+                                                      negative_dr = True
+                                                      )
+
+
+        #output = spk.output_modules.Atomwise(reps.n_symfuncs)
+        model = atm.AtomisticModel(std_reps, output)
+        #model = spk.AtomisticModel(representation, output_modules)
+
+        # build optimizer
+        optimizer = Adam(params=model.parameters(), lr=1e-4)
+
+        # hooks
+        logging.info("build trainer")
+        metrics = [MeanAbsoluteError(p, p) for p in properties] + \
+                  [RootMeanSquaredError(p, p) for p in properties]
+        hooks = [CSVHook(log_path=model_dir, metrics=metrics), 
+                ReduceLROnPlateauHook(optimizer), 
+                TensorboardHook(log_path=model_dir,
+                metrics=metrics)]
+
+        # trainer
+        #loss = lambda b, p: F.mse_loss(p["y"], b['energy','force'])
+        loss = mse_loss(properties)
+
+
+        trainer = Trainer(
+            model_dir,
+            model=model,
+            hooks=hooks,
+            loss_fn=loss,
+            optimizer=optimizer,
+            train_loader=train_loader,
+            validation_loader=val_loader,
+            #device = 'cuda'
+        )
+
+        # run training
+
+        logging.info("training")
+        trainer.train(device="cuda", n_epochs=1000000)
+
