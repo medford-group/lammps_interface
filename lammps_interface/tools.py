@@ -8,7 +8,7 @@ import importlib
 import numpy as np
 import os
 from ase import io
-from ase.geometry.analysis import Analysis
+#from ase.geometry.analysis import Analysis
 from pymatgen.io.ase import AseAtomsAdaptor as adaptor
 from ase.spacegroup import crystal
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
@@ -284,8 +284,9 @@ def center_traj(traj, output_name = 'fixed.traj'):
     write(ouput_name, new_traj)
 
 
-def parse_custom_dump(dump, datafile, label = 'atoms',
-                      energyfile = None, write_traj = False):
+def parse_custom_dump(dump, datafile, label='atoms',
+                      energyfile=None, write_traj=False,
+                      units='real'):
     """
     This function parses the output of a LAMMPS custom dump file. Currently
     this function assumes you've put in this for the custom dump: 
@@ -303,6 +304,7 @@ def parse_custom_dump(dump, datafile, label = 'atoms',
             A list contianing atoms objects for each recorded timestep.
     """
     from ase.atoms import Atoms    
+    from ase.units import kcal, mol, fs
     f = open(dump,'r')
     text = f.read()
     #if 'type x y z fx fy fz' not in text:
@@ -311,6 +313,17 @@ def parse_custom_dump(dump, datafile, label = 'atoms',
     #                    ' Further functionality is planned to be added.')
     if datafile is not None:
         element_key = elements_from_datafile(datafile)
+    if units == 'metal':
+        ps = fs * 1000 # I /think/ this is right
+        F_conversion = 1
+        E_conversion = 1
+        V_conversion =(1 / ps)
+    elif units == 'real':
+        F_conversion = (kcal / mol)
+        E_conversion = (kcal / mol)
+        V_conversion = (1 / fs)
+
+
     steps = text.split('ITEM: TIMESTEP')[1:]
     atoms_list = []
     if energyfile is not None:
@@ -342,18 +355,24 @@ def parse_custom_dump(dump, datafile, label = 'atoms',
             del pos
         # parse the forces
         if 'fx' in dump_format and 'fy' in dump_format and 'fz' in dump_format:
-            from ase.units import kcal, mol
             fx = dump_format.index('fx')
             fy = dump_format.index('fy')
             fz = dump_format.index('fz')
             forces = data[:, [fx, fy, fz]]
-            forces *= (kcal / mol)  # convert to eV/A
+            forces *= F_conversion  # convert to eV/A
         # parse the potential energy
         if 'c_energy' in dump_format:
             eng = dump_format.index('c_energy')
-            per_atom_energy = data[:,eng] * (kcal / mol)  # convert to eV/A
+            per_atom_energy = data[:,eng] * E_conversion  # convert to eV/A
             atoms.set_initial_charges(per_atom_energy)
             energy = sum(per_atom_energy)
+        # parse the velocities
+        if 'vx' in dump_format and 'vy' in dump_format and 'vz' in dump_format:
+            vx = dump_format.index('fx')
+            vy = dump_format.index('fy')
+            vz = dump_format.index('fz')
+            velocities = data[:, [vx, vy, vz]]
+            velocities *= V_conversion  # convert to A/[AU time]
         # recover the cell
         cell = step[2].strip().split('\n')
         if cell[0].split()[-3:] == ['pp', 'pp', 'pp']:
@@ -364,6 +383,8 @@ def parse_custom_dump(dump, datafile, label = 'atoms',
             cell_mat[i][i] = top - bot
             atoms.positions[:,i] -= bot
         atoms.cell = cell_mat
+        if 'velocities' in locals():
+            atoms.set_velocities(velocities)
         # build calculator, it is critical that this is done last
         from ase.calculators.singlepoint import SinglePointCalculator as SP
         calc = SP(atoms, forces = forces, energy = energy)
