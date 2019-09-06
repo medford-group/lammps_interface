@@ -975,7 +975,7 @@ def make_params_file(elements, etas, rs_s, g4_eta = 4, cutoff = 6.5,
     
     """
     if type(g4_eta) == int:
-        g4_eta = np.logspace(-5, -1, num = g4_eta)
+        g4_eta = np.linspace(-5, -1, num = g4_eta)
     for element in elements:
         with open('params_{}'.format(element),'w') as f:
             # G2
@@ -996,6 +996,154 @@ def make_params_file(elements, etas, rs_s, g4_eta = 4, cutoff = 6.5,
                     n += 1
                     if n > len(elements):
                         break
+
+def reorganize_simple_nn_derivative(image, dx_dict):
+    """
+    reorganizes the fingerprint derivatives from simplen_nn into
+    amp format
+
+    Parameters:
+        image (ASE atoms object):
+            the atoms object used to make the finerprint
+        dx_dict (dict):
+            a dictionary of the fingerprint derivatives from simple_nn
+
+    """
+    # TODO check for bugs
+    d = defaultdict(list)
+    sym_dict = defaultdict(list)
+    syms = image.get_chemical_symbols()
+    for i, sym in enumerate(syms):
+        sym_dict[sym].append(i)
+    # the structure is:
+    # [elements][atom i][symetry function #][atom j][derivitive in direction]
+    for element, full_arr in dx_dict.items():
+        for i, arr_t in enumerate(full_arr):
+            true_i = sym_dict[element][i]
+            for sf in arr_t:
+                for j, dir_arr in enumerate(sf):
+                    for k, derivative in enumerate(dir_arr):
+                        if derivative == 0.:
+                            continue
+                        d[(true_i,element,j,syms[j],k)].append(derivative)
+    d = dict(d)
+    return d
+
+def reorganize_simple_nn_fp(image, x_dict):
+    """
+    reorganizes the fingerprints from simplen_nn into
+    amp format
+
+    Parameters:
+        image (ASE atoms object):
+            the atoms object used to make the finerprint
+        x_dict (dict):
+            a dictionary of the fingerprints from simple_nn
+
+    """
+    # TODO check for bugs
+    # the structure is:
+    # [elements][atom i][symetry function #][fp]
+    fp_l = []
+    sym_dict = defaultdict(list)
+    syms = image.get_chemical_symbols()
+    for i, sym in enumerate(syms):
+        sym_dict[sym].append(i)
+    for element, full_arr in x_dict.items():
+        for i, fp  in enumerate(full_arr):
+            true_i = sym_dict[i]
+            fp_l.append((element,list(fp)))
+    return fp_l
+
+def convert_simple_nn_fps(traj):
+    # make the directories
+    if not os.path.isdir('./amp-fingerprints.ampdb'):
+        os.mkdir('./amp-fingerprints.ampdb')
+    if not os.path.isdir('./amp-fingerprints.ampdb/loose'):
+        os.mkdir('./amp-fingerprints.ampdb/loose')
+    if not os.path.isdir('./amp-fingerprint-primes.ampdb'):
+        os.mkdir('./amp-fingerprint-primes.ampdb')
+    if not os.path.isdir('./amp-fingerprint-primes.ampdb/loose'):
+        os.mkdir('amp-fingerprint-primes.ampdb/loose')
+    for i, image in enumerate(traj):
+        pickle = load(open('./data/data{}.pickle'.format(i + 1), 'rb'))
+        im_hash = get_hash(image)
+        x_list = reorganize_simple_nn_fp(image, pickle['x'])
+        dump(x_list, open('./amp-fingerprints.ampdb/loose/' + im_hash, 'wb'))
+        del x_list # free up memory just in case
+        x_der_dict = reorganize_simple_nn_derivative(image, pickle['dx'])
+        dump(x_der_dict, open('./amp-fingerprint-primes.ampdb/loose/' + im_hash, 'wb'))
+
+
+class dummy_simple_nn(object):
+    """
+    a dummy class to fool the simple_nn descripto class into
+    thinking it's attached to a simple_nn instance
+    """
+    def __init__(self, inputs, descriptor):
+        self.inputs = inputs
+
+def make_simple_nn_fps(traj, clean_up_directory=True):
+    """
+    generates descriptors using simple_nn. The files are stored in the
+    ./data folder. These descriptors will be in the simple_nn form and
+    not immediately useful for other programs
+
+    Parameters:
+        traj (list of ASE atoms objects):
+            a list of the atoms you'd like to make descriptors for
+        clean_up_directory (bool):
+            if set to True, the input files made by simple_nn will
+            be deleted
+
+    returns:
+        None
+    """
+    from simple_nn.features.symmetry_function import Symmetry_function
+
+    # handle inputs
+    if type(traj) != list:
+        traj = [traj]
+
+    # set up the input files
+    io.write('simple_nn_input_traj.traj',traj)
+    with open('str_list', 'w') as f:
+        f.write('simple_nn_input_traj.traj :') # simple_nn requires this file
+
+    # TODO make this general
+    etas = np.linspace(0.0001, 4, 10)
+    rs_s = [0] * 10
+
+    syms = []
+
+    for image in traj:
+        syms += image.get_chemical_symbols()
+        syms = list(set(syms))
+
+    make_params_file(syms, etas, rs_s, g4_eta=2)
+
+
+    # build the descriptor object
+    descriptor = Symmetry_function()
+    params = {a:'params_{}'.format(a) for a in syms}
+
+    descriptor.inputs = {'params': params, 
+                         'refdata_format': 'traj', 
+                         'compress_outcar': False, 
+                         'data_per_tfrecord': 150, 
+                         'valid_rate': 0.1, 
+                         'remain_pickle': False, 
+                         'continue': False, 
+                         'add_atom_idx': True, 
+                         'num_parallel_calls': 5, 
+                         'atomic_weights': {'type': None, 'params': {}}, 
+                         'weight_modifier': {'type': None, 'params': {}}, 
+                         'scale_type': 'minmax', 
+                         'scale_scale': 1.0, 
+                         'scale_rho': None}
+
+    # generate the descriptors
+    descriptor.generate()
 
 def extract_rdf(filename, plot = False):
     """
