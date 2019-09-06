@@ -4,13 +4,14 @@ Created on Wed Jan  9 12:31:50 2019
 author: Ben Comer (Georgia Tech)
 """
 import importlib
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 
 import numpy as np
 import os
 from ase import io
 import json
 from io import StringIO
+import pickle
 
 from ase.geometry.analysis import Analysis
 from pymatgen.io.ase import AseAtomsAdaptor as adaptor
@@ -965,7 +966,7 @@ def gaussian_fit_descriptors(traj, n_gaussians = 5, cutoff = 6.5,
 
 
 def make_params_file(elements, etas, rs_s, g4_eta = 4, cutoff = 6.5,
-                     g4_zeta=[1.0, 4.0]):
+                     g4_zeta=[1.0, 4.0], g4_gamma=[1, -1]):
     """
     makes a params file for simple_NN. This is the file containing
     the descriptors. This function makes g2 descriptos for the eta
@@ -1000,7 +1001,7 @@ def make_params_file(elements, etas, rs_s, g4_eta = 4, cutoff = 6.5,
     for element in elements:
         with open('params_{}'.format(element),'w') as f:
             # G2
-            for species in range(1, len(element) + 2):
+            for species in range(1, len(element) + 1):
                 for eta, Rs in zip(etas, rs_s):
                     f.write('2 {} 0 {} {} {} 0.0\n'.format(species, cutoff,
                                                            np.round(eta, 6), Rs))
@@ -1009,7 +1010,7 @@ def make_params_file(elements, etas, rs_s, g4_eta = 4, cutoff = 6.5,
                 n = i
                 while True:
                     for eta in g4_eta:
-                        for lamda in [1.0, -1.0]:
+                        for lamda in g4_gamma:
                             for zeta in g4_zeta:
                                 f.write('4 {} {} {} {} {} {}\n'.format(i, n, cutoff,
                                                                          np.round(eta, 6),
@@ -1044,9 +1045,14 @@ def reorganize_simple_nn_derivative(image, dx_dict):
             for sf in arr_t:
                 for j, dir_arr in enumerate(sf):
                     for k, derivative in enumerate(dir_arr):
-                        if derivative == 0.:
-                            continue
                         d[(true_i,element,j,syms[j],k)].append(derivative)
+    zero_keys = []
+    for key, derivatives in d.items():
+        zero_check = [a == 0 for a in derivatives]
+        if zero_check == [True] * len(derivatives):
+            zero_keys.append(key)
+    #for key in zero_keys:
+    #    del d[key]
     d = dict(d)
     return d
 
@@ -1076,7 +1082,40 @@ def reorganize_simple_nn_fp(image, x_dict):
             fp_l.append((element,list(fp)))
     return fp_l
 
-def convert_simple_nn_fps(traj):
+def get_hash(atoms):
+    import hashlib
+    """Creates a unique signature for a particular ASE atoms object.
+
+    This is used to check whether an image has been seen before. This is just
+    an md5 hash of a string representation of the atoms object.
+
+    Parameters
+    ----------
+    atoms : ASE dict
+        ASE atoms object.
+
+    Returns
+    -------
+        Hash string key of 'atoms'.
+    """
+    string = str(atoms.pbc)
+    try:
+        flattened_cell = atoms.cell.array.flatten()
+    except AttributeError:  # older ASE
+        flattened_cell = atoms.cell.flatten()
+    for number in flattened_cell:
+        string += '%.15f' % number
+    for number in atoms.get_atomic_numbers():
+        string += '%3d' % number
+    for number in atoms.get_positions().flatten():
+        string += '%.15f' % number
+
+    md5 = hashlib.md5(string.encode('utf-8'))
+    hash = md5.hexdigest()
+    return hash
+
+
+def convert_simple_nn_fps(traj, delete_old=False):
     # make the directories
     if not os.path.isdir('./amp-fingerprints.ampdb'):
         os.mkdir('./amp-fingerprints.ampdb')
@@ -1086,25 +1125,36 @@ def convert_simple_nn_fps(traj):
         os.mkdir('./amp-fingerprint-primes.ampdb')
     if not os.path.isdir('./amp-fingerprint-primes.ampdb/loose'):
         os.mkdir('amp-fingerprint-primes.ampdb/loose')
+    # perform the reorganization
     for i, image in enumerate(traj):
-        pickle = load(open('./data/data{}.pickle'.format(i + 1), 'rb'))
+        pic = pickle.load(open('./data/data{}.pickle'.format(i + 1), 'rb'))
         im_hash = get_hash(image)
-        x_list = reorganize_simple_nn_fp(image, pickle['x'])
-        dump(x_list, open('./amp-fingerprints.ampdb/loose/' + im_hash, 'wb'))
-        del x_list # free up memory just in case
-        x_der_dict = reorganize_simple_nn_derivative(image, pickle['dx'])
-        dump(x_der_dict, open('./amp-fingerprint-primes.ampdb/loose/' + im_hash, 'wb'))
+        x_list = reorganize_simple_nn_fp(image, pic['x'])
+        pickle.dump(x_list, open('./amp-fingerprints.ampdb/loose/' + im_hash, 'wb'))
+        del x_list  # free up memory just in case
+        x_der_dict = reorganize_simple_nn_derivative(image, pic['dx'])
+        pickle.dump(x_der_dict, open('./amp-fingerprint-primes.ampdb/loose/' + im_hash, 'wb'))
+        del x_der_dict  # free up memory just in case
+        if delete_old:  # in case disk space is an issue
+            os.remove('./data/data{}.pickle'.format(i + 1))
+    if delete_old:
+        os.rmdir('./data')
 
 
-class dummy_simple_nn(object):
+class DummySimple_nn(object):
     """
-    a dummy class to fool the simple_nn descripto class into
+    a dummy class to fool the simple_nn descriptor class into
     thinking it's attached to a simple_nn instance
     """
-    def __init__(self, inputs, descriptor):
-        self.inputs = inputs
+    def __init__(self, atom_types):
+        self.inputs = {
+            'generate_features': True,
+            'preprocess': False,
+            'train_model': True,
+            'atom_types': atom_types}
+        self.logfile = open('simple_nn_log', 'w')
 
-def make_simple_nn_fps(traj, clean_up_directory=True):
+def make_simple_nn_fps(traj, descriptors, clean_up_directory=True):
     """
     generates descriptors using simple_nn. The files are stored in the
     ./data folder. These descriptors will be in the simple_nn form and
@@ -1113,6 +1163,8 @@ def make_simple_nn_fps(traj, clean_up_directory=True):
     Parameters:
         traj (list of ASE atoms objects):
             a list of the atoms you'd like to make descriptors for
+        descriptors (tuple):
+            a tuple containing (g2_etas, g2_rs_s, g4_etas, cutoff, g4_zetas, g4_gammas)
         clean_up_directory (bool):
             if set to True, the input files made by simple_nn will
             be deleted
@@ -1131,26 +1183,21 @@ def make_simple_nn_fps(traj, clean_up_directory=True):
     with open('str_list', 'w') as f:
         f.write('simple_nn_input_traj.traj :') # simple_nn requires this file
 
-    # TODO make this general
-    etas = np.linspace(0.0001, 4, 10)
-    rs_s = [0] * 10
-
-    syms = []
-
+    atom_types = []
+    # TODO rewrite this
     for image in traj:
-        syms += image.get_chemical_symbols()
-        syms = list(set(syms))
+        atom_types += image.get_chemical_symbols()
+        atom_types = list(set(atom_types))
 
-    make_params_file(syms, etas, rs_s, g4_eta=2)
-
+    make_params_file(atom_types, *descriptors)
 
     # build the descriptor object
     descriptor = Symmetry_function()
-    params = {a:'params_{}'.format(a) for a in syms}
+    params = {a:'params_{}'.format(a) for a in atom_types}
 
     descriptor.inputs = {'params': params, 
                          'refdata_format': 'traj', 
-                         'compress_outcar': False, 
+                         'compress_outcar': False,
                          'data_per_tfrecord': 150, 
                          'valid_rate': 0.1, 
                          'remain_pickle': False, 
@@ -1162,9 +1209,35 @@ def make_simple_nn_fps(traj, clean_up_directory=True):
                          'scale_type': 'minmax', 
                          'scale_scale': 1.0, 
                          'scale_rho': None}
+    dummy_class = DummySimple_nn(atom_types=atom_types)
+    descriptor.parent = dummy_class
 
     # generate the descriptors
     descriptor.generate()
+    
+    # clean the folder of all the junk
+    files = ['simple_nn_input_traj.traj', 'str_list',
+            'pickle_list', 'simple_nn_log']
+    for file in files:
+        os.remove(file)
+
+def make_amp_descriptors_simple_nn(traj, g2_etas, g2_rs_s, g4_etas, g4_zetas, g4_gammas, cutoff):
+    """
+    uses simple_nn to make descriptors in the amp format.
+    Only creates the same symmetry functions for each element
+    for now.
+    """
+    c = cutoff
+    #g2_etas = [a * cutoff for a in g2_etas]
+    #g4_etas = [a * cutoff for a in g4_etas]
+    make_simple_nn_fps(traj,
+                       (g2_etas, g2_rs_s, g4_etas, 
+                        cutoff, 
+                        g4_zetas, g4_gammas),
+                       clean_up_directory=True)
+    convert_simple_nn_fps(traj, delete_old=True)
+
+
 
 def extract_rdf(filename, plot = False):
     """
