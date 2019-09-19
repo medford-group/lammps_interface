@@ -6,6 +6,6 @@ atoms.set_cell([10,10,10])
 atoms.set_pbc([True] * 3)
 
 atoms = single_point_lammps(atoms, method='simple_nn_single_point',
-                            ff_file='ffield.reax.water_2017')
+                            ff_file='psi4_potential')
 
 print(atoms.get_potential_energy())

@@ -1717,8 +1717,8 @@ def calc_rmse(array1, array2):
     return np.sqrt(np.mean(sq_errs))
 
 def single_point_lammps(atoms, method='simple_nn_single_point',
-                        ff_file='ffield.reax.water_2017'):
-    make_standard_input(calculation_type='reaxff_single_point',
+                        ff_file='ffield.reax.water_2017', atoms_order=['H', 'O']):
+    make_standard_input(calculation_type=method,
                         ff_file=ff_file)
     write_lammps_data(atoms)
     os.system('lmp < lmp.input > lmp.log')

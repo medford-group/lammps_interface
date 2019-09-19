@@ -89,7 +89,7 @@ input_files = {
     atom_style   full
     read_data "lmp.data"
     pair_style nn
-    pair_coeff * * {} O H
+    pair_coeff * * {} H O 
 
     compute energy all pe/atom
     variable energy equal c_energy
