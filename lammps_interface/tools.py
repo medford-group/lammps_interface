@@ -5,6 +5,8 @@ author: Ben Comer (Georgia Tech)
 """
 import importlib
 from collections import namedtuple, defaultdict
+import itertools
+import shutil
 
 import numpy as np
 import os
@@ -727,7 +729,7 @@ def put_molecules_on_slab(atoms, offset = 1.5,
 def make_rdf_based_descriptors(images, n_descriptors=20,
                                cutoff=6.5, 
                                fall_off_percent=0.2,
-                               descriptor_type='simplenn',
+                               descriptor_type='simple-nn',
                                nbins=200,
                                plot=False):
     """
@@ -829,7 +831,8 @@ def make_rdf_based_descriptors(images, n_descriptors=20,
         plt.savefig('rdf.png')
         plt.show()
 
-    if descriptor_type.lower() == 'amp':
+    
+    if descriptor_type.lower() in ['amp', 'simple-nn']:
         etas = [a / cutoff for a in etas]
     return etas, rs_s
 
@@ -1173,7 +1176,8 @@ class DummySimple_nn(object):
             'atom_types': atom_types}
         self.logfile = open('simple_nn_log', 'w')
 
-def make_simple_nn_fps(traj, descriptors, clean_up_directory=True):
+def make_simple_nn_fps(traj, descriptors, clean_up_directory=True,
+                       elements='all'):
     """
     generates descriptors using simple_nn. The files are stored in the
     ./data folder. These descriptors will be in the simple_nn form and
@@ -1197,16 +1201,24 @@ def make_simple_nn_fps(traj, descriptors, clean_up_directory=True):
     if type(traj) != list:
         traj = [traj]
 
+    # clean up any previous runs
+    if os.path.isdir('./data'):
+        shutil.rmtree('./data')
+
     # set up the input files
     io.write('simple_nn_input_traj.traj',traj)
     with open('str_list', 'w') as f:
         f.write('simple_nn_input_traj.traj :') # simple_nn requires this file
 
-    atom_types = []
-    # TODO rewrite this
-    for image in traj:
-        atom_types += image.get_chemical_symbols()
-        atom_types = list(set(atom_types))
+
+    if elements == 'all':
+        atom_types = []
+        # TODO rewrite this
+        for image in traj:
+            atom_types += image.get_chemical_symbols()
+            atom_types = list(set(atom_types))
+    else:
+        atom_types = elements
 
     make_params_file(atom_types, *descriptors)
 
@@ -1258,6 +1270,44 @@ def make_amp_descriptors_simple_nn(traj, g2_etas, g2_rs_s, g4_etas, g4_zetas, g4
                         clean_up_directory=True)
     convert_simple_nn_fps(traj, delete_old=True)
 
+def make_fingerprint_matrix(traj, descriptors, clean_up_directory=True,
+                            elements='all'):
+    """
+    make a massive array of the fingerprints of a trajectory
+    """
+    arrays_dict = {}
+    if elements == 'all':
+        elements = []
+        for image in traj:
+            elements += image.get_chemical_symbols()
+            elements = list(set(elements))
+
+
+    # calculate how many different combinations of atoms there are
+    combinations = itertools.combinations_with_replacement(elements, 2)
+    num_combinations = len([a for a in combinations])
+
+    fp_len = len(descriptors[0]) * len(elements) + \
+             len(descriptors[2]) * len(descriptors[4]) * len(descriptors[5]) * num_combinations
+
+    for element in elements:
+        arrays_dict[element] = np.array([], dtype='float64').reshape(0, fp_len)
+    make_simple_nn_fps(traj, descriptors, clean_up_directory=clean_up_directory, 
+                       elements=elements)
+    for image in os.listdir('./data'):
+        dat = pickle.load(open('./data/' + image, 'rb'))
+        for element in elements:
+            if element not in dat['x'].keys():
+                continue
+            array = np.array(dat['x'][element], dtype='float64')
+            current = arrays_dict[element]
+
+            new = np.concatenate((current, array), axis=0)
+            arrays_dict[element] = new
+    arrays_dict['total'] = np.empty((0, fp_len))
+    for array in arrays_dict.values():
+        arrays_dict['total'] = np.concatenate((arrays_dict['total'], array), axis=0)
+    return arrays_dict
 
 
 def extract_rdf(filename, plot = False):
@@ -1423,20 +1473,33 @@ def json_to_atoms(json_atoms):
         atoms = io.read(f, format='json')
     return atoms
 
-def rereference_traj(traj):
+def rereference_traj(traj, reference_energy):
     """
-    subtracts off the first energy in a trajectory from all the other
+    subtracts off the reference energy provided from all the other
     energies and returns the result
+
+    Parameters:
+        traj (list of ASE atoms objects):
+            a list of images you'd like to re-reference
+        reference_energy (float):
+            the reference energy you'd like to subtract from the images
+
+    returns:
+        traj (list of ASE atoms objects):
+            the re-referenced trajectory
+
     """
     from ase.calculators.singlepoint import SinglePointCalculator as sp
     from ase.io.trajectory import Trajectory
-    first_eng = traj[0].get_potential_energy()
-    #writer = Trajectory('out.traj', mode = 'w')
+
+    # in case they didn't read the documenation well
+    if type(traj) != list:
+        traj = [traj]
 
     for image in traj:
         frc = image.get_forces()
         eng = image.get_potential_energy()
-        image.set_calculator(sp(image, energy = eng - first_eng,
+        image.set_calculator(sp(image, energy = eng - reference_energy,
                             forces = frc))
     return traj
 
@@ -1446,6 +1509,19 @@ def restart_simple_nn(num):
     e3 = os.system('cp SAVER_epoch{}.index SAVER.index'.format(num))
     if e1 or e2 or e3:
         raise RuntimeError('could not restart simple_nn')
+
+def fix_pbc(traj):
+    from ase.calculators.singlepoint import SinglePointCalculator as sp
+    if type(traj) != list:
+        traj = [traj]
+    for image in traj:
+        energy = image.get_potential_energy()
+        forces = image.get_forces()
+        image.set_pbc([True] * 3)
+        image.wrap(pbc=[True] * 3)
+        image.set_calculator(sp(image, energy = energy,
+                            forces = forces))
+    return traj
 
 def parse_simple_nn_log(directory='.', plot=False):
     import matplotlib.pyplot as plt
@@ -1592,6 +1668,46 @@ def atomic_parity_plot(traj1, traj2):
     plt.scatter(E1, E2)
     plt.plot([min(E1 + E2)] * 2, [max(E1 + E2)] * 2)
     plt.show()
+
+def amp_parity_plot(amp_calc='amp-checkpoint.amp', images=None,
+                    training_images=None, per_atom=True):
+    from amp import Amp
+    from matplotlib import pyplot as plt
+    true_engs = []
+    amp_engs = []
+    for run_set in [images, training_images]:
+        if run_set is None:
+            continue
+        for image in run_set:
+            calc = Amp.load(amp_calc)
+            true_engs.append(image.get_potential_energy())
+            image.set_calculator(calc)
+            amp_engs.append(image.get_potential_energy())
+            print(true_engs[-1], amp_engs[-1])
+            del calc
+            #if per_atom:
+            #    true_engs = [a / len(image) for a in true_engs]
+            #    amp_engs = [a / len(image) for a in amp_engs]
+    fig = plt.figure()
+    ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])
+    ax.plot(true_engs[:len(images)], amp_engs[:len(images)], 'ob',
+            label='test set')
+    if training_images is not None:
+        ax.plot(true_engs[len(images):], amp_engs[len(images):],
+                'ok', label='training set')
+    print([a for a in zip(true_engs[:len(images)], amp_engs[:len(images)])])
+    ax.plot([min(true_engs),max(true_engs)], [min(true_engs), max(true_engs)])
+    ax.set_title('Parity Plot With AMP')
+    ax.set_ylabel('AMP energy')
+    ax.set_xlabel('Method Energy')
+    ax.legend()
+    plt.show()
+
+def calc_rmse(array1, array2):
+    sq_errs = []
+    for i, j in zip(array1, array2):
+        sq_errs.append((i - j) ** 2)
+    return np.sqrt(np.mean(sq_errs))
 
 def run_schnetpack(db_file):
         import os
