@@ -71,5 +71,32 @@ input_files = {
     thermo          1000
     run   {}""",
 
+'reaxff_single_point':"""    units        real
+    atom_style   full
+    read_data "lmp.data"
+    pair_style reax/c control.reaxff
+    pair_coeff * * {}  O H
+
+    fix             2 all qeq/reax 1 0.0 10.0 1.0e-6 reax/c
+
+    compute energy all pe/atom
+    variable energy equal c_energy
+    dump molfile all custom 1 atoms.atm type x y z fx fy fz c_energy
+    run   0
+""",
+
+'simple_nn_single_point':"""    units        real
+    atom_style   full
+    read_data "lmp.data"
+    pair_style nn
+    pair_coeff * * {} O H
+
+    compute energy all pe/atom
+    variable energy equal c_energy
+    dump molfile all custom 1 atoms.atm type x y z fx fy fz c_energy
+    run   0
+
+
+""",
 
 }

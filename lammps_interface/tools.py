@@ -505,12 +505,19 @@ def make_standard_input(calculation_type = 'reaxff',
     from .standard_inputs import input_files
 
     with open('lmp.input','w') as f:
-        f.write(input_files[calculation_type].format(
+        if 'single_point_reaxff' in calculation_type:
+            f.write(input_files[calculation_type].format(
+                                                     ff_file))
+        if 'single_point_simple_nn' in calculation_type:
+            f.write(input_files[calculation_type].format(
+                                                     ff_file))
+        else:
+            f.write(input_files[calculation_type].format(
                                                      ff_file,
                                                      timestep, 
                                                      temp, 
                                                      steps))
-    if calculation_type == 'reaxff':
+    if 'reaxff' in calculation_type:
         import inspect
         cwd = os.getcwd()
         package_directory = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
@@ -1708,6 +1715,19 @@ def calc_rmse(array1, array2):
     for i, j in zip(array1, array2):
         sq_errs.append((i - j) ** 2)
     return np.sqrt(np.mean(sq_errs))
+
+def single_point_lammps(atoms, method='simple_nn_single_point',
+                        ff_file='ffield.reax.water_2017'):
+    make_standard_input(calculation_type='reaxff_single_point',
+                        ff_file=ff_file)
+    write_lammps_data(atoms)
+    os.system('lmp < lmp.input > lmp.log')
+    atoms = parse_custom_dump('atoms.atm', 'lmp.data', label='atoms',
+                              energyfile=None, write_traj=False,
+                              units='real')
+    return atoms
+
+
 
 def run_schnetpack(db_file):
         import os
