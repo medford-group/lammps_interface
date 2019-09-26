@@ -486,12 +486,13 @@ def strip_bonding_information(filename):
     f.writelines(lines)
     f.close()
     
-def make_standard_input(calculation_type = 'reaxff',
-                        ff_file = 'TiO2_water.reax',
-                        timestep = 0.2, 
-                        ensemble = 'nvt',
-                        steps = 20000,
-                        temp = 300):
+def make_standard_input(calculation_type='reaxff',
+                        ff_file='TiO2_water.reax',
+                        timestep=0.2, 
+                        ensemble='nvt',
+                        steps=20000,
+                        temp=300,
+                        elements=None):
     """
     TODO: make sure that the atoms are placed in order in the .in file
     function to just generate a generic input file to run a basic
@@ -504,13 +505,19 @@ def make_standard_input(calculation_type = 'reaxff',
      
     from .standard_inputs import input_files
 
+    atoms_in_order = ' '.join(elements)
+
     with open('lmp.input','w') as f:
         if 'single_point_reaxff' in calculation_type:
+            atoms_in_order = ' '.join(elements)
             f.write(input_files[calculation_type].format(
-                                                     ff_file))
+                                                     ff_file,
+                                                     atoms_in_order))
         if 'single_point_simple_nn' in calculation_type:
+            atoms_in_order = ' '.join(elements)
             f.write(input_files[calculation_type].format(
-                                                     ff_file))
+                                                     ff_file,
+                                                     atoms_in_order))
         else:
             f.write(input_files[calculation_type].format(
                                                      ff_file,
@@ -1007,7 +1014,7 @@ def make_params_file(elements, etas, rs_s, g4_eta = 4, cutoff = 6.5,
     
     """
     if type(g4_eta) == int:
-        g4_eta = np.linspace(-5, -1, num = g4_eta)
+        g4_eta = np.logspace(-4, -1, num = g4_eta)
     for element in elements:
         with open('params_{}'.format(element),'w') as f:
             # G2
@@ -1278,11 +1285,12 @@ def make_amp_descriptors_simple_nn(traj, g2_etas, g2_rs_s, g4_etas, g4_zetas, g4
     convert_simple_nn_fps(traj, delete_old=True)
 
 def make_fingerprint_matrix(traj, descriptors, clean_up_directory=True,
-                            elements='all'):
+                            elements='all', return_image_inds=False):
     """
     make a massive array of the fingerprints of a trajectory
     """
     arrays_dict = {}
+    image_inds = defaultdict(list)
     if elements == 'all':
         elements = []
         for image in traj:
@@ -1301,20 +1309,25 @@ def make_fingerprint_matrix(traj, descriptors, clean_up_directory=True,
         arrays_dict[element] = np.array([], dtype='float64').reshape(0, fp_len)
     make_simple_nn_fps(traj, descriptors, clean_up_directory=clean_up_directory, 
                        elements=elements)
-    for image in os.listdir('./data'):
+    for i, image in enumerate(os.listdir('./data')):
         dat = pickle.load(open('./data/' + image, 'rb'))
         for element in elements:
             if element not in dat['x'].keys():
                 continue
             array = np.array(dat['x'][element], dtype='float64')
             current = arrays_dict[element]
-
             new = np.concatenate((current, array), axis=0)
+            image_inds[element] += [i] * len(array)
             arrays_dict[element] = new
+    
     arrays_dict['total'] = np.empty((0, fp_len))
+
     for array in arrays_dict.values():
         arrays_dict['total'] = np.concatenate((arrays_dict['total'], array), axis=0)
-    return arrays_dict
+    if return_image_inds:
+        return arrays_dict, image_inds
+    else:
+        return arrays_dict
 
 
 def extract_rdf(filename, plot = False):
@@ -1719,7 +1732,7 @@ def calc_rmse(array1, array2):
 def single_point_lammps(atoms, method='simple_nn_single_point',
                         ff_file='ffield.reax.water_2017', atoms_order=['H', 'O']):
     make_standard_input(calculation_type=method,
-                        ff_file=ff_file)
+                        ff_file=ff_file,elements=atoms_order)
     write_lammps_data(atoms)
     os.system('lmp < lmp.input > lmp.log')
     atoms = parse_custom_dump('atoms.atm', 'lmp.data', label='atoms',

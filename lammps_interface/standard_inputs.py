@@ -75,7 +75,7 @@ input_files = {
     atom_style   full
     read_data "lmp.data"
     pair_style reax/c control.reaxff
-    pair_coeff * * {}  O H
+    pair_coeff * * {}  {}
 
     fix             2 all qeq/reax 1 0.0 10.0 1.0e-6 reax/c
 
@@ -85,11 +85,11 @@ input_files = {
     run   0
 """,
 
-'simple_nn_single_point':"""    units        real
+'single_point_simple_nn':"""    units        real
     atom_style   full
     read_data "lmp.data"
     pair_style nn
-    pair_coeff * * {} H O 
+    pair_coeff * * {} {} 
 
     compute energy all pe/atom
     variable energy equal c_energy
