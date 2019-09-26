@@ -1288,6 +1288,33 @@ def make_fingerprint_matrix(traj, descriptors, clean_up_directory=True,
                             elements='all', return_image_inds=False):
     """
     make a massive array of the fingerprints of a trajectory
+
+    inputs:
+        traj: (list of ASE atoms objects)
+            The list of atoms objects you'd like to include in the fingerprint
+            matrix.
+        descriptors: (tuple)
+            a tuple containing (g2_etas, g2_rs_s, g4_etas, cutoff, g4_zetas, g4_gammas)
+        clean_up_directory: (bool)
+            If set to True, the input files used will be deleted after calculations
+            are complete
+        elements: (list or str)
+            if a list of elements is passed in, fingerprints will only be calculated
+            for those elements (other atoms are just ignored, as if the did not exist)
+            if 'all' is passed in all elements found in the trajectory are included
+        return_image_inds: (bool)
+            If set to True, the indicies of the original image for each fingerprint
+            are also returned
+
+    returns:
+        arrays_dict: (dict)    
+            a dictionary containing the chemical elements in the images as keys
+            and the fingerprints of those elements as values
+        image_inds: (dict)
+            a dictionary with the same keys as `arrays_dict` but whose values
+            contain the index of the input variable `traj` where that finerprint
+            is found
+
     """
     arrays_dict = {}
     image_inds = defaultdict(list)
