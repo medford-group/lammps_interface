@@ -20,7 +20,7 @@ Since this package consists of python functions you'll need to import them from 
 from lammps_interface.lammps_interface.tools import make_box_of_molecules
 from ase.build import molecule
 
-atoms = make_box_of_molecules(molecule[H2O],700,[40,40,40])
+atoms = make_box_of_molecules(molecule(H2O),700,[40,40,40])
 ```
 
 There are lots of goodies in there that you may find valuble.
