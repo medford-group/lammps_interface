@@ -518,6 +518,19 @@ def make_standard_input(calculation_type='reaxff',
             f.write(input_files[calculation_type].format(
                                                      ff_file,
                                                      atoms_in_order))
+        if 'single_point_eam' in calculation_type:
+            atoms_in_order = ' '.join(elements)
+            f.write(input_files[calculation_type].format(
+                                                     ff_file,
+                                                     atoms_in_order))
+        if 'eam' in calculation_type:
+            atoms_in_order = ' '.join(elements)
+            f.write(input_files[calculation_type].format(
+                                                     ff_file,
+                                                     atoms_in_order,
+                                                     temp,
+                                                     steps))
+
         else:
             f.write(input_files[calculation_type].format(
                                                      ff_file,
@@ -532,6 +545,13 @@ def make_standard_input(calculation_type='reaxff',
         control = os.path.join(package_directory, 'special_input_files/control.reaxff')
         copyfile(ff, os.path.join(cwd, ff_file))
         copyfile(control, os.path.join(cwd, 'control.reaxff'))
+    elif 'eam' in  calculation_type:
+        import inspect
+        cwd = os.getcwd()
+        package_directory = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+        ff = os.path.join(package_directory, 'special_input_files/' + ff_file)
+        copyfile(ff, os.path.join(cwd, ff_file))
+
 
     
     
@@ -652,7 +672,7 @@ def make_wulffish_nanoparticle(atoms, millers, surface_energies,
         particle = prune_oxygens(particle, metal = 'Ti')
     return particle
 
-def prune_oxygens(atoms, metal = None):
+def prune_oxygens(atoms, metal=None, bond_distance=2.2):
     """
     a function that removes all oxygens that have a coordination less
     that 2 based on a 2.2 A maximum bond distance. This is meant for
@@ -846,7 +866,7 @@ def make_rdf_based_descriptors(images, n_descriptors=20,
         plt.show()
 
     
-    if descriptor_type.lower() in ['amp', 'simple-nn']:
+    if descriptor_type.lower() in ['amp']:
         etas = [a / cutoff for a in etas]
     return etas, rs_s
 
@@ -860,6 +880,7 @@ def gaussian_basis(x, a, xk, sigma):
     sigma: the standard deviation
     """
     return a * np.exp( -1 * ((x - xk) ** 2 / (2 * sigma ** 2)))
+
 
 def n_sized_gaussian(x, *a):
     """
@@ -875,8 +896,8 @@ def n_sized_gaussian(x, *a):
     return s
 
 
-def gaussian_fit_descriptors(traj, n_gaussians = 5, cutoff = 6.5, 
-                             nbins = 10, plot = False):
+def gaussian_fit_descriptors(traj, n_gaussians=5, cutoff=6.5, 
+                             nbins=10, plot=False):
     """
     approximates the RDF using a sum of gaussian functions then 
     uses the centers and standard deviations of those gaussians to
@@ -983,7 +1004,8 @@ def gaussian_fit_descriptors(traj, n_gaussians = 5, cutoff = 6.5,
 
 
 def make_params_file(elements, etas, rs_s, g4_eta = 4, cutoff = 6.5,
-                     g4_zeta=[1.0, 4.0], g4_gamma=[1, -1]):
+                     g4_zeta=[1.0, 4.0], g4_gamma=[1, -1],
+                     convert_from_amp=False):
     """
     makes a params file for simple_NN. This is the file containing
     the descriptors. This function makes g2 descriptos for the eta
@@ -1013,8 +1035,13 @@ def make_params_file(elements, etas, rs_s, g4_eta = 4, cutoff = 6.5,
 
     
     """
+    if len(etas) != len(rs_s):
+        raise ValueError('the length of etas and rs_s must be the same')
     if type(g4_eta) == int:
         g4_eta = np.logspace(-4, -1, num = g4_eta)
+    if convert_from_amp:
+        etas = [a * cutoff for a in etas]
+        g4_eta = [a * cutoff for a in g4_eta]
     for element in elements:
         with open('params_{}'.format(element),'w') as f:
             # G2
@@ -1027,11 +1054,11 @@ def make_params_file(elements, etas, rs_s, g4_eta = 4, cutoff = 6.5,
                 n = i
                 while True:
                     for eta in g4_eta:
-                        for lamda in g4_gamma:
+                        for gamma in g4_gamma:
                             for zeta in g4_zeta:
                                 f.write('4 {} {} {} {} {} {}\n'.format(i, n, cutoff,
-                                                                         np.round(eta, 6),
-                                                                         zeta, lamda))
+                                                                       np.round(eta, 6),
+                                                                       zeta, gamma))
                     n += 1
                     if n > len(elements):
                         break
@@ -1190,7 +1217,8 @@ class DummySimple_nn(object):
             'atom_types': atom_types}
         self.logfile = open('simple_nn_log', 'w')
 
-def make_simple_nn_fps(traj, descriptors, clean_up_directory=True,
+
+def make_simple_nn_fps(traj, descriptors, clean_up_directory=False,
                        elements='all'):
     """
     generates descriptors using simple_nn. The files are stored in the
@@ -1220,10 +1248,9 @@ def make_simple_nn_fps(traj, descriptors, clean_up_directory=True,
         shutil.rmtree('./data')
 
     # set up the input files
-    io.write('simple_nn_input_traj.traj',traj)
+    io.write('simple_nn_input_traj.traj', traj)
     with open('str_list', 'w') as f:
         f.write('simple_nn_input_traj.traj :') # simple_nn requires this file
-
 
     if elements == 'all':
         atom_types = []
@@ -1234,7 +1261,7 @@ def make_simple_nn_fps(traj, descriptors, clean_up_directory=True,
     else:
         atom_types = elements
 
-    make_params_file(atom_types, *descriptors)
+    make_params_file(atom_types, *descriptors, convert_from_amp=True)
 
     # build the descriptor object
     descriptor = Symmetry_function()
@@ -1260,7 +1287,7 @@ def make_simple_nn_fps(traj, descriptors, clean_up_directory=True,
     # generate the descriptors
     descriptor.generate()
     
-    if clean_up_directory:
+    if False:
         # clean the folder of all the junk
         files = ['simple_nn_input_traj.traj', 'str_list',
                  'pickle_list', 'simple_nn_log']
@@ -1268,20 +1295,24 @@ def make_simple_nn_fps(traj, descriptors, clean_up_directory=True,
         for file in files:
             os.remove(file)
 
-def make_amp_descriptors_simple_nn(traj, g2_etas, g2_rs_s, g4_etas, g4_zetas, g4_gammas, cutoff):
+def make_amp_descriptors_simple_nn(traj, g2_etas, g2_rs_s, g4_etas, g4_zetas, g4_gammas, cutoff,
+                                   elements='all',descriptor_type='simple_nn'):
     """
     uses simple_nn to make descriptors in the amp format.
     Only creates the same symmetry functions for each element
     for now.
     """
+    if descriptor_type == 'amp':
+        g2_etas = [a / cutoff ** 2 for a in g2_etas]
+        g4_etas = [a / cutoff ** 2 for a in g4_etas]
+
     c = cutoff
-    #g2_etas = [a * cutoff for a in g2_etas]
-    #g4_etas = [a * cutoff for a in g4_etas]
     make_simple_nn_fps(traj,
                        (g2_etas, g2_rs_s, g4_etas, 
                         cutoff, 
                         g4_zetas, g4_gammas),
-                        clean_up_directory=True)
+                        clean_up_directory=True,
+                        elements=elements)
     convert_simple_nn_fps(traj, delete_old=True)
 
 def make_fingerprint_matrix(traj, descriptors, clean_up_directory=True,
@@ -1569,6 +1600,24 @@ def fix_pbc(traj):
         image.set_calculator(sp(image, energy = energy,
                             forces = forces))
     return traj
+
+def clean_traj(traj):
+    from ase.calculators.singlepoint import SinglePointCalculator as sp
+    if type(traj) != list:
+        traj = [traj]
+    energies = np.array([a.get_potential_energy() for a in traj])
+    forces = [a.get_forces() for a in traj]
+    new_images = []
+    std_energy = np.std(energies)
+    median_energy = np.median(energies)
+    for image, energy, force in zip(traj, energies, forces):
+        if abs(energy - median_energy) > 3 * std_energy:
+            continue
+        image.set_calculator(sp(image, energy = energy,
+                            forces = force))
+        new_images.append(image)
+    return new_images
+
 
 def parse_simple_nn_log(directory='.', plot=False):
     import matplotlib.pyplot as plt

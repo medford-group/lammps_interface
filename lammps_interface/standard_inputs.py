@@ -71,6 +71,27 @@ input_files = {
     thermo          1000
     run   {}""",
 
+'eam':"""    units        metal
+    atom_style   full
+    boundary p p p
+    read_data "lmp.data"
+    pair_style eam/alloy
+    pair_coeff * * {}  {}
+    minimize 1.0e-5 1.0e-7 1000 10000
+
+    compute energy all pe/atom
+    variable energy equal c_energy
+    dump molfile all custom 500 atoms.atm type x y z fx fy fz c_energy
+    #fix 1 all 1 0.0 10.0 1.0e-6 qeq/reax
+    #fix   fxnvt all nvt temp 300.0 300.0 500.0 tchain 1
+    fix   fxnvp all npt temp {} 300.0 500.0 tchain 1 iso 1.0 1.0 1000
+    velocity all create 300.0 132354 dist gaussian
+    #compute myRDF all rdf 100
+    #fix 1 all ave/time 100 1 1000000 c_myRDF[*] file tmp.rdf mode vector
+    velocity all 300.0 4928459 rot yes dist gaussian
+    run   {}
+""",
+
 'reaxff_single_point':"""    units        real
     atom_style   full
     read_data "lmp.data"
@@ -99,4 +120,16 @@ input_files = {
 
 """,
 
+
+'single_point_eam':"""    units        metal
+    atom_style   full
+    read_data "lmp.data"
+    pair_style eam/alloy
+    pair_coeff * * {}  {}
+
+    compute energy all pe/atom
+    variable energy equal c_energy
+    dump molfile all custom 1 atoms.atm type x y z fx fy fz c_energy
+    run   0
+""",
 }
