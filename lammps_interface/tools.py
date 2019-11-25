@@ -1264,7 +1264,7 @@ def make_simple_nn_fps(traj, descriptors, clean_up_directory=False,
     make_params_file(atom_types, *descriptors, convert_from_amp=True)
 
     # build the descriptor object
-    descriptor = Symmetry_function()
+    descriptor = Symmetry_function(fp_dir='.')
     params = {a:'params_{}'.format(a) for a in atom_types}
 
     descriptor.inputs = {'params': params, 
@@ -1285,7 +1285,7 @@ def make_simple_nn_fps(traj, descriptors, clean_up_directory=False,
     descriptor.parent = dummy_class
 
     # generate the descriptors
-    descriptor.generate()
+    descriptor.generate(label='')
     
     if False:
         # clean the folder of all the junk
